@@ -20,7 +20,7 @@ class FastApiCompatibilityTests(unittest.TestCase):
 
     def test_create_user_and_login(self) -> None:
         register_response = self.client.put(
-            "/createUser",
+            "/api/createUser",
             json={"username": "testuser", "password": "testpassword1"},
         )
         self.assertEqual(register_response.status_code, 200)
@@ -28,7 +28,7 @@ class FastApiCompatibilityTests(unittest.TestCase):
         self.assertTrue(register_payload["result"])
 
         login_response = self.client.post(
-            "/loginUser",
+            "/api/loginUser",
             json={"username": "testuser", "password": "testpassword1"},
         )
         self.assertEqual(login_response.status_code, 200)
@@ -38,20 +38,20 @@ class FastApiCompatibilityTests(unittest.TestCase):
 
     def test_group_and_event_flow(self) -> None:
         user_payload = self.client.put(
-            "/createUser",
+            "/api/createUser",
             json={"username": "groupowner", "password": "testpassword2"},
         ).json()
         user_id = user_payload["userId"]
 
         group_payload = self.client.post(
-            "/createGroup",
+            "/api/createGroup",
             json={"name": "Weekend Crew", "description": "Friends", "userId": user_id},
         ).json()
         self.assertTrue(group_payload["result"])
         group_id = group_payload["groupId"]
 
         event_payload = self.client.put(
-            "/createEvent",
+            "/api/createEvent",
             json={
                 "name": "Picnic",
                 "time": "2026-04-01",
@@ -65,14 +65,14 @@ class FastApiCompatibilityTests(unittest.TestCase):
         ).json()
         self.assertTrue(event_payload["result"])
 
-        groups_response = self.client.get("/getAllGroups")
+        groups_response = self.client.get("/api/getAllGroups")
         self.assertEqual(groups_response.status_code, 200)
         groups_payload = groups_response.json()
         self.assertEqual(len(groups_payload["groups"]), 1)
         self.assertEqual(len(groups_payload["groups"][0]["events"]), 1)
 
         map_events = self.client.post(
-            "/getMapEvents",
+            "/api/getMapEvents",
             json={
                 "bottomLeftLong": -2,
                 "bottomLeftLat": 50,
