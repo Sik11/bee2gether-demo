@@ -39,6 +39,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def normalize_api_prefix(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if path == "/api":
+        request.scope["path"] = "/"
+    elif path.startswith("/api/"):
+        request.scope["path"] = path[4:]
+    return await call_next(request)
+
+
 def _json_error(message: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"result": False, "msg": message}, status_code=status_code)
 
