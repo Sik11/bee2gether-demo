@@ -1,0 +1,21 @@
+:root {
+  --primary-color: #000000;
+  --secondary-color: #048eff;
+  --background-color: #ffffff;
+  --prime-color: #FFC01F;
+  --shadow: rgba(0, 0, 0, 0.3); 
+  --logo: url('./logo.png');
+
+  /* Transition variables */
+  --cubic-bezier: cubic-bezier(.57,.95,.71,.91);
+  --background-transition: background-color 0.2s var(--cubic-bezier);
+}
+
+.dark-mode {
+  --primary-color: #ffffff; 
+  --secondary-color: #9fd4ff;
+  --background-color: #000000; 
+  --prime-color: #FFC01F;
+  --shadow: rgba(255, 255, 255, 0.3);
+  --logo: url('./dark-logo.png');
+}

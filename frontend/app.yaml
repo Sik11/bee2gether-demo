@@ -1,0 +1,25 @@
+# Use NodeJS on flexible app engine
+runtime: nodejs
+env: flex
+
+# Add handlers to use the build dist
+handlers:
+  # Serve static files with url ending with a file extension
+  - url: /(.*\..+)$
+    static_files: dist/\1
+    upload: dist/.*\..+$
+  # Catch all handler to index.html
+  - url: /.*
+    static_files: dist/index.html
+    upload: dist/index.html
+
+# Only use one instance
+manual_scaling:
+  instances: 1
+
+# Use low resources during development and testing
+resources:
+  cpu: 1
+  memory_gb: 0.5
+  disk_size_gb: 10
+

@@ -1,0 +1,16 @@
+{
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "deprecated",
+    "AzureWebJobsStorage": "deprecated",
+    "AzureCosmosDBConnectionString": "deprecated",
+    "DatabaseName": "deprecated",
+    "UsersContainer": "deprecated",
+    "EventsContainer": "deprecated",
+    "UsersToEventsContainer": "deprecated",
+    "GroupsContainer": "deprecated",
+    "UsersToGroupsContainer": "deprecated",
+    "DeploymentURL": "http://localhost:8000",
+    "FunctionAppKey": "deprecated"
+  },
+  "IsEncrypted": false
+}
