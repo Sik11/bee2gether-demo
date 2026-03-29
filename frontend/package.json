@@ -14,7 +14,6 @@
     "@dicebear/core": "^5.3.5",
     "@mdi/js": "^7.4.47",
     "cors": "^2.8.5",
-    "esbuild-darwin-arm64": "^0.14.54",
     "express": "^4.18.2",
     "http-proxy-middleware": "^2.0.6",
     "leaflet": "^1.9.4",
