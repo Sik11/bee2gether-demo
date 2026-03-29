@@ -139,8 +139,8 @@ def _upload_to_supabase(event_id: str, upload: UploadFile, file_bytes: bytes) ->
     response = requests.post(
         upload_url,
         headers={
-            "Authorization": f"Bearer {settings.supabase_service_key}",
-            "apikey": settings.supabase_service_key,
+            "Authorization": f"Bearer {settings.supabase_secret_key}",
+            "apikey": settings.supabase_secret_key,
             "x-upsert": "true",
             "Content-Type": upload.content_type or "application/octet-stream",
         },
@@ -156,7 +156,7 @@ def _upload_to_supabase(event_id: str, upload: UploadFile, file_bytes: bytes) ->
 
 
 def _store_image(event_id: str, upload: UploadFile, file_bytes: bytes) -> str:
-    if settings.supabase_url and settings.supabase_service_key:
+    if settings.supabase_url and settings.supabase_secret_key:
         return _upload_to_supabase(event_id, upload, file_bytes)
     return _build_inline_image_url(upload.content_type or "application/octet-stream", file_bytes)
 
@@ -166,7 +166,7 @@ def healthcheck() -> dict[str, Any]:
     return {
         "result": True,
         "storage": "memory" if settings.use_memory_db else "mongo",
-        "imageStorage": "supabase" if settings.supabase_url and settings.supabase_service_key else "inline",
+        "imageStorage": "supabase" if settings.supabase_url and settings.supabase_secret_key else "inline",
     }
 
 

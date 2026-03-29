@@ -58,7 +58,7 @@ uvicorn backend.main:app --reload --port 8000
 Defaults:
 
 - If `MONGODB_URI` is not set, the backend runs with an in-memory repository.
-- If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are not set, uploaded images are stored inline on the event document as data URLs.
+- If `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are not set, uploaded images are stored inline on the event document as data URLs.
 
 Environment variables live in [`backend/.env.example`](backend/.env.example).
 
@@ -86,7 +86,7 @@ Optional frontend env vars:
   - `MONGODB_DB_NAME`
   - `FRONTEND_ORIGIN`
   - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `SUPABASE_SECRET_KEY`
   - `SUPABASE_BUCKET`
 
 ### Exact Vercel Environment Variables
@@ -97,7 +97,7 @@ Use these values in Vercel Project Settings -> Environment Variables for both `P
 MONGODB_URI=mongodb+srv://<username>:<password>@<cluster-url>/<db>?retryWrites=true&w=majority
 MONGODB_DB_NAME=bee2gether
 SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key>
+SUPABASE_SECRET_KEY=<supabase-secret-key>
 SUPABASE_BUCKET=event-images
 FRONTEND_ORIGIN=*
 ```
@@ -122,9 +122,11 @@ That variable only changes the compatibility query string sent by the frontend. 
 - `MONGODB_URI`: MongoDB Atlas -> Database -> Connect -> Drivers
 - `MONGODB_DB_NAME`: the logical database name you want this app to use, for example `bee2gether`
 - `SUPABASE_URL`: Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY`: Supabase -> Project Settings -> API -> service role key
+- `SUPABASE_SECRET_KEY`: Supabase -> Project Settings -> API Keys -> secret key
 - `SUPABASE_BUCKET`: the public storage bucket name you create for event images, for example `event-images`
 - `FRONTEND_ORIGIN`: `*` is the simplest choice here because the frontend and API are served from the same Vercel project and preview URLs change per deployment
+
+The backend still accepts the legacy `SUPABASE_SERVICE_ROLE_KEY` env var as a fallback, but `SUPABASE_SECRET_KEY` is now the preferred name and should be used for new deployments.
 
 ### Vercel Deploy Steps
 

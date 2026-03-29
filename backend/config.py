@@ -11,7 +11,7 @@ class Settings:
     database_name: str
     frontend_origin: str
     supabase_url: str
-    supabase_service_key: str
+    supabase_secret_key: str
     supabase_bucket: str
     use_memory_db: bool
 
@@ -24,7 +24,10 @@ def get_settings() -> Settings:
         database_name=os.getenv("MONGODB_DB_NAME", "bee2gether"),
         frontend_origin=os.getenv("FRONTEND_ORIGIN", "*"),
         supabase_url=os.getenv("SUPABASE_URL", "").strip(),
-        supabase_service_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip(),
+        supabase_secret_key=(
+            os.getenv("SUPABASE_SECRET_KEY", "").strip()
+            or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        ),
         supabase_bucket=os.getenv("SUPABASE_BUCKET", "event-images").strip() or "event-images",
         use_memory_db=os.getenv("USE_MEMORY_DB", "").lower() == "true" or not mongodb_uri,
     )
