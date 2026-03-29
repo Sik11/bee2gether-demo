@@ -551,8 +551,6 @@ def get_event_attendees() -> JSONResponse:
         {"eventId": event["id"], "attendees": list(event.get("attendees", []))}
         for event in repository.list_events()
     ]
-    if not event_attendees:
-        return _json_error("No events found", 404)
     return JSONResponse({"result": True, "eventAttendees": event_attendees})
 
 
