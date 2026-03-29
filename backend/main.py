@@ -14,7 +14,7 @@ from uuid import uuid4
 import bcrypt
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 import requests
 
 from backend.config import get_settings
@@ -27,6 +27,7 @@ repository = (
     if settings.use_memory_db
     else MongoRepository(settings.mongodb_uri, settings.database_name)
 )
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 app = FastAPI(title="Bee2Gether API")
 app.add_middleware(
@@ -124,6 +125,19 @@ def _sanitize_filename(filename: str) -> str:
     return safe.strip("-") or f"upload-{uuid4().hex}"
 
 
+def _get_frontend_file(relative_path: str) -> Path | None:
+    if not FRONTEND_DIST.exists():
+        return None
+    candidate = (FRONTEND_DIST / relative_path.lstrip("/")).resolve()
+    try:
+        candidate.relative_to(FRONTEND_DIST.resolve())
+    except ValueError:
+        return None
+    if candidate.is_file():
+        return candidate
+    return None
+
+
 def _build_inline_image_url(content_type: str, data: bytes) -> str:
     encoded = base64.b64encode(data).decode("ascii")
     return f"data:{content_type};base64,{encoded}"
@@ -168,6 +182,14 @@ def healthcheck() -> dict[str, Any]:
         "storage": "memory" if settings.use_memory_db else "mongo",
         "imageStorage": "supabase" if settings.supabase_url and settings.supabase_secret_key else "inline",
     }
+
+
+@app.get("/", include_in_schema=False)
+async def serve_frontend_index() -> FileResponse:
+    index_file = _get_frontend_file("index.html")
+    if index_file is None:
+        raise HTTPException(status_code=404, detail="Frontend build not found")
+    return FileResponse(index_file)
 
 
 @app.api_route("/createUser", methods=["PUT"])
@@ -703,6 +725,19 @@ async def update_user(request: Request) -> JSONResponse:
             user[field] = list(payload[field])
     repository.update_user(user)
     return JSONResponse({"result": True, "msg": "User updated successfully", "userId": user["id"]})
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend_path(full_path: str) -> FileResponse:
+    requested_file = _get_frontend_file(full_path)
+    if requested_file is not None:
+        return FileResponse(requested_file)
+
+    index_file = _get_frontend_file("index.html")
+    if index_file is not None:
+        return FileResponse(index_file)
+
+    raise HTTPException(status_code=404, detail="Frontend build not found")
 
 
 @app.exception_handler(HTTPException)
