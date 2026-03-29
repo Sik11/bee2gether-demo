@@ -12,7 +12,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import bcrypt
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 import requests
@@ -30,6 +30,7 @@ repository = (
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 app = FastAPI(title="Bee2Gether API")
+api_router = APIRouter(prefix="/api")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.frontend_origin == "*" else [settings.frontend_origin],
@@ -37,16 +38,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def normalize_api_prefix(request: Request, call_next):
-    path = request.scope.get("path", "")
-    if path == "/api":
-        request.scope["path"] = "/"
-    elif path.startswith("/api/"):
-        request.scope["path"] = path[4:]
-    return await call_next(request)
 
 
 def _json_error(message: str, status_code: int = 400) -> JSONResponse:
@@ -185,7 +176,7 @@ def _store_image(event_id: str, upload: UploadFile, file_bytes: bytes) -> str:
     return _build_inline_image_url(upload.content_type or "application/octet-stream", file_bytes)
 
 
-@app.get("/health")
+@api_router.get("/health")
 def healthcheck() -> dict[str, Any]:
     return {
         "result": True,
@@ -202,7 +193,7 @@ async def serve_frontend_index() -> FileResponse:
     return FileResponse(index_file)
 
 
-@app.api_route("/createUser", methods=["PUT"])
+@api_router.api_route("/createUser", methods=["PUT"])
 async def create_user(request: Request) -> JSONResponse:
     payload = await request.json()
     username = str(payload.get("username", "")).strip()
@@ -229,7 +220,7 @@ async def create_user(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "OK", "userId": user_id})
 
 
-@app.api_route("/loginUser", methods=["POST"])
+@api_router.api_route("/loginUser", methods=["POST"])
 async def login_user(request: Request) -> JSONResponse:
     payload = await request.json()
     username = str(payload.get("username", "")).strip()
@@ -254,7 +245,7 @@ async def login_user(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"]})
 
 
-@app.api_route("/getUserInfo", methods=["POST"])
+@api_router.api_route("/getUserInfo", methods=["POST"])
 async def get_user_info(request: Request) -> JSONResponse:
     payload = await request.json()
     username = payload.get("username")
@@ -266,7 +257,7 @@ async def get_user_info(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "user": _user_response(user)})
 
 
-@app.api_route("/createGroup", methods=["POST"])
+@api_router.api_route("/createGroup", methods=["POST"])
 async def create_group(request: Request) -> JSONResponse:
     payload = await request.json()
     name = str(payload.get("name", "")).strip()
@@ -298,7 +289,7 @@ async def create_group(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Group created successfully", "groupId": group_id})
 
 
-@app.api_route("/getAllGroups", methods=["GET"])
+@api_router.api_route("/getAllGroups", methods=["GET"])
 def get_all_groups() -> JSONResponse:
     groups = [_group_response(group) for group in repository.list_groups()]
     if not groups:
@@ -306,7 +297,7 @@ def get_all_groups() -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Groups retrieved successfully", "groups": groups})
 
 
-@app.api_route("/joinGroup", methods=["POST"])
+@api_router.api_route("/joinGroup", methods=["POST"])
 async def join_group(request: Request) -> JSONResponse:
     payload = await request.json()
     user_id = payload.get("userId")
@@ -327,7 +318,7 @@ async def join_group(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Joined group successfully"})
 
 
-@app.api_route("/getAllUserGroups", methods=["POST"])
+@api_router.api_route("/getAllUserGroups", methods=["POST"])
 async def get_all_user_groups(request: Request) -> JSONResponse:
     payload = await request.json()
     if not payload.get("userId") and not payload.get("username"):
@@ -346,7 +337,7 @@ async def get_all_user_groups(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "memberGroups": groups})
 
 
-@app.api_route("/createEvent", methods=["PUT"])
+@api_router.api_route("/createEvent", methods=["PUT"])
 async def create_event(request: Request) -> JSONResponse:
     payload = await request.json()
     name = str(payload.get("name", "")).strip()
@@ -402,7 +393,7 @@ async def create_event(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Event created successfully", "eventId": event_id})
 
 
-@app.api_route("/getMapEvents", methods=["POST"])
+@api_router.api_route("/getMapEvents", methods=["POST"])
 async def get_map_events(request: Request) -> JSONResponse:
     payload = await request.json()
     try:
@@ -423,7 +414,7 @@ async def get_map_events(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "events": events})
 
 
-@app.api_route("/searchEvent", methods=["POST"])
+@api_router.api_route("/searchEvent", methods=["POST"])
 async def search_event(request: Request) -> JSONResponse:
     payload = await request.json()
     name = str(payload.get("name", "")).strip()
@@ -436,7 +427,7 @@ async def search_event(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Event found", "events": events})
 
 
-@app.api_route("/addAttendingEvent", methods=["PUT"])
+@api_router.api_route("/addAttendingEvent", methods=["PUT"])
 async def add_attending_event(request: Request) -> JSONResponse:
     payload = await request.json()
     event_id = payload.get("eventId")
@@ -468,7 +459,7 @@ async def add_attending_event(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "eventId": event_id})
 
 
-@app.api_route("/removeAttendingEvent", methods=["DELETE"])
+@api_router.api_route("/removeAttendingEvent", methods=["DELETE"])
 async def remove_attending_event(request: Request) -> JSONResponse:
     payload = await request.json()
     event_id = payload.get("eventId")
@@ -496,7 +487,7 @@ async def remove_attending_event(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "eventId": event_id})
 
 
-@app.api_route("/getAttendingEvents", methods=["POST"])
+@api_router.api_route("/getAttendingEvents", methods=["POST"])
 async def get_attending_events(request: Request) -> JSONResponse:
     payload = await request.json()
     if not payload.get("userId") and not payload.get("username"):
@@ -522,7 +513,7 @@ async def get_attending_events(request: Request) -> JSONResponse:
     )
 
 
-@app.api_route("/getEventInfo", methods=["POST"])
+@api_router.api_route("/getEventInfo", methods=["POST"])
 async def get_event_info(request: Request) -> JSONResponse:
     payload = await request.json()
     event_id = payload.get("eventId")
@@ -534,7 +525,7 @@ async def get_event_info(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "eventInfo": _event_response(event), "event": _event_response(event)})
 
 
-@app.api_route("/getEventImgs", methods=["POST"])
+@api_router.api_route("/getEventImgs", methods=["POST"])
 async def get_event_imgs(request: Request) -> JSONResponse:
     payload = await request.json()
     event_id = payload.get("eventId")
@@ -555,7 +546,7 @@ async def get_event_imgs(request: Request) -> JSONResponse:
     )
 
 
-@app.api_route("/getEventAttendees", methods=["GET"])
+@api_router.api_route("/getEventAttendees", methods=["GET"])
 def get_event_attendees() -> JSONResponse:
     event_attendees = [
         {"eventId": event["id"], "attendees": list(event.get("attendees", []))}
@@ -564,7 +555,7 @@ def get_event_attendees() -> JSONResponse:
     return JSONResponse({"result": True, "eventAttendees": event_attendees})
 
 
-@app.api_route("/getGroupEvents", methods=["POST"])
+@api_router.api_route("/getGroupEvents", methods=["POST"])
 async def get_group_events(request: Request) -> JSONResponse:
     payload = await request.json()
     group_id = payload.get("groupId")
@@ -582,7 +573,7 @@ async def get_group_events(request: Request) -> JSONResponse:
     )
 
 
-@app.api_route("/getAllUserGroupEvents", methods=["POST"])
+@api_router.api_route("/getAllUserGroupEvents", methods=["POST"])
 async def get_all_user_group_events(request: Request) -> JSONResponse:
     payload = await request.json()
     user_id = payload.get("userId")
@@ -607,7 +598,7 @@ async def get_all_user_group_events(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Events retrieved successfully", "events": all_events})
 
 
-@app.api_route("/uploadEventImage", methods=["POST"])
+@api_router.api_route("/uploadEventImage", methods=["POST"])
 async def upload_event_image(file: UploadFile = File(...), eventId: str = Form(...)) -> PlainTextResponse:
     event = repository.get_event_by_id(eventId)
     if event is None:
@@ -626,7 +617,7 @@ async def upload_event_image(file: UploadFile = File(...), eventId: str = Form(.
     return PlainTextResponse(f"The file {file.filename} uploaded successfully. URL: {image_url}")
 
 
-@app.api_route("/deleteEvent", methods=["DELETE"])
+@api_router.api_route("/deleteEvent", methods=["DELETE"])
 async def delete_event(request: Request) -> JSONResponse:
     payload = await request.json()
     event_id = payload.get("eventId")
@@ -649,7 +640,7 @@ async def delete_event(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Event removed successfully", "eventId": str(event_id)})
 
 
-@app.api_route("/deleteGroup", methods=["DELETE"])
+@api_router.api_route("/deleteGroup", methods=["DELETE"])
 async def delete_group(request: Request) -> JSONResponse:
     payload = await request.json()
     group_id = payload.get("groupId")
@@ -676,7 +667,7 @@ async def delete_group(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Group deleted successfully", "groupId": str(group_id)})
 
 
-@app.api_route("/updateEvent", methods=["POST", "PUT", "PATCH"])
+@api_router.api_route("/updateEvent", methods=["POST", "PUT", "PATCH"])
 async def update_event(request: Request) -> JSONResponse:
     payload = await request.json()
     event = None
@@ -703,7 +694,7 @@ async def update_event(request: Request) -> JSONResponse:
     return JSONResponse({"result": True, "msg": "Event updated successfully"})
 
 
-@app.api_route("/updateUser", methods=["POST", "PUT", "PATCH"])
+@api_router.api_route("/updateUser", methods=["POST", "PUT", "PATCH"])
 async def update_user(request: Request) -> JSONResponse:
     payload = await request.json()
     user = None
@@ -733,6 +724,9 @@ async def update_user(request: Request) -> JSONResponse:
             user[field] = list(payload[field])
     repository.update_user(user)
     return JSONResponse({"result": True, "msg": "User updated successfully", "userId": user["id"]})
+
+
+app.include_router(api_router)
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
