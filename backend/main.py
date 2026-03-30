@@ -115,6 +115,15 @@ def _notification_response(notification: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(notification)
 
 
+@api_router.get("/health")
+async def health_check() -> dict[str, Any]:
+    return {
+        "result": True,
+        "status": "ok",
+        "database": "memory" if settings.use_memory_db else "mongo",
+    }
+
+
 def _lookup_user(payload: dict[str, Any]) -> dict[str, Any] | None:
     if payload.get("userId"):
         return repository.get_user_by_id(payload["userId"])

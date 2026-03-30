@@ -6,17 +6,17 @@ Bee2Gether is a location-based social event app. It replaces the original paid G
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Vue 3, Vite, SCSS, Leaflet, OpenStreetMap |
+| Frontend | Vue 3, Vite, SCSS, MapLibre GL JS, OpenFreeMap |
 | Backend | FastAPI |
 | Database | MongoDB Atlas or in-memory fallback for local testing |
 | Image Storage | Supabase Storage or inline data URL fallback |
-| Deployment | Vercel-compatible frontend + Python API setup |
+| Deployment | Render static site + Render Python web service |
 
 ## Project Layout
 
 ```
 cloudAppBeeCW-1/
-├── api/                    # Vercel Python entrypoint
+├── api/                    # Legacy Vercel Python entrypoint
 ├── backend/
 │   ├── main.py             # FastAPI compatibility app
 │   ├── repository.py       # MongoDB + in-memory repositories
@@ -29,14 +29,15 @@ cloudAppBeeCW-1/
 │   │   ├── store/
 │   │   └── api.js
 │   ├── package.json
-│   ├── vite.config.js
+│   ├── vite.config.mjs
 │   └── server.js
+├── render.yaml
 └── vercel.json
 ```
 
 ## What Changed
 
-- Google Maps was replaced with Leaflet and OpenStreetMap tiles.
+- Google Maps was replaced with MapLibre GL JS and OpenFreeMap.
 - Google Places autocomplete was replaced with free-text geocoding via Nominatim plus a “use current location” flow.
 - Azure Functions were replaced with a single FastAPI app that preserves the old endpoint names.
 - Azure Cosmos DB was replaced with a repository layer that supports MongoDB Atlas and a local in-memory fallback.
@@ -77,7 +78,85 @@ Optional frontend env vars:
 - `VITE_API_BASE_URL` to call a remote backend directly instead of using the local proxy
 - `VITE_API_CODE` if you want to keep the old query param shape with a custom demo token
 
-## Deployment Notes
+## Render Deployment
+
+This repo is ready to run on Render as two services from the same Git repo:
+
+- `bee2gether-api` as a Render `Web Service`
+- `bee2gether-web` as a Render `Static Site`
+
+The repo includes [`render.yaml`](render.yaml) so you can create both services from a single Blueprint.
+
+### 1. Create the Blueprint
+
+In Render:
+
+1. Click `New` -> `Blueprint`
+2. Connect this GitHub repo
+3. Confirm Render detects [`render.yaml`](render.yaml)
+4. Create both services
+
+### 2. Backend Service Settings
+
+The Blueprint config uses:
+
+```text
+buildCommand: pip install -r backend/requirements.txt
+startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+healthCheckPath: /api/health
+```
+
+Required backend env vars:
+
+```text
+MONGODB_URI
+MONGODB_DB_NAME=bee2gether
+FRONTEND_ORIGIN=https://<your-frontend-service>.onrender.com
+SUPABASE_URL
+SUPABASE_SECRET_KEY
+SUPABASE_BUCKET=event-images
+```
+
+### 3. Frontend Service Settings
+
+The Blueprint config uses:
+
+```text
+rootDir: frontend
+buildCommand: npm install && npm run build
+staticPublishPath: frontend/dist
+```
+
+Required frontend env vars:
+
+```text
+VITE_API_BASE_URL=https://<your-backend-service>.onrender.com/api
+VITE_API_CODE=render-demo
+```
+
+The static site also includes a rewrite rule so Vue Router routes resolve to `index.html`.
+
+### 4. MongoDB Atlas Allowlist
+
+For Atlas, allowlist the Render outbound CIDR range(s) for the backend service region. Do this in Atlas:
+
+1. `Network Access`
+2. Add the outbound CIDR range(s) shown in the Render backend service's `Connect` -> `Outbound` section
+3. Remove temporary `0.0.0.0/0` after Render connectivity is confirmed
+
+### 5. Render Health Check
+
+The backend now exposes:
+
+```text
+GET /api/health
+```
+
+Render uses this endpoint for zero-downtime deploy health checks.
+
+## Optional Vercel Deployment
+
+If you still want to use Vercel, the legacy configuration remains in place.
 
 - `vercel.json` is configured to build the Vue frontend and expose the Python API entrypoint from `api/index.py`.
 - Root [`requirements.txt`](requirements.txt) is present for Vercel's Python runtime, and [`.python-version`](.python-version) pins deployment to Python 3.12.
