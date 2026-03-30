@@ -1,204 +1,280 @@
 <script setup>
-import { pages } from '../store/pages'
+import { computed, ref, watchEffect } from 'vue';
+import { pages } from '../store/pages';
 import Page from './helper/Page.vue';
-import { sendJoinEvent, sendLeaveEvent, removeEvent, events, findEventAttendees } from '../store/events'
-import { ref, watchEffect, toRefs } from 'vue';
+import { sendJoinEvent, sendLeaveEvent, removeEvent, events, findEventAttendees, toggleSavedEvent } from '../store/events';
 import { auth } from '../store/auth';
-import heartBackground from '../assets/heart-background-full.png'
+import { userLocation } from '../store/userLocation';
+import heartBackground from '../assets/heart-background-full.png';
 import Avatar from './helper/Avatar.vue';
+import { formatDistanceLabel, formatEventDate } from '../utils/eventMeta';
 
-const msg = ref('')
+const msg = ref('');
 const showJoin = ref(true);
+const isSaved = computed(() => events.isEventSaved(events.selected.id));
+const isOwner = computed(() => events.selected.userId === auth.user.userId);
+const distanceLabel = computed(() => formatDistanceLabel(userLocation.location, events.selected));
+
 const join = async () => {
   const response = await sendJoinEvent(auth.user.userId, auth.user.username, events.selected.id);
   events.selected.attendees = await findEventAttendees(events.selected.id);
   msg.value = response.msg || '';
-}
+};
 
 const leave = async () => {
   const response = await sendLeaveEvent(auth.user.userId, events.selected.id);
   events.selected.attendees = await findEventAttendees(events.selected.id);
   msg.value = response.msg || '';
-}
+};
 
 const onDelete = async () => {
-  const response = await removeEvent(events.selected.id, auth.user.userId);
+  await removeEvent(events.selected.id, auth.user.userId);
   msg.value = '';
-  pages.dropLayer()
-}
+  events.clearSelectedEvent();
+  pages.dropLayer();
+};
+
 function backtoMap() {
   msg.value = '';
-  pages.dropLayer()
+  events.clearSelectedEvent();
+  pages.dropLayer();
+}
+
+async function saveEvent() {
+  const response = await toggleSavedEvent(auth.user.userId, events.selected.id);
+  msg.value = response.msg || '';
+}
+
+async function copyEventLink() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', pages.selected);
+  url.searchParams.set('event', events.selected.id);
+  await navigator.clipboard.writeText(url.toString());
+  msg.value = 'Link copied';
 }
 
 watchEffect(() => {
-  // Check if 'attendees' exists in 'events.selected'
   if (!events.selected.attendees) {
-    return; // Do nothing if 'attendees' is not present
+    return;
   }
 
-  // Proceed with the existing logic if 'attendees' is present
   showJoin.value = !events.selected.attendees.some(attendee => attendee.userId === auth.user.userId);
 });
-
-
 </script>
 
 <template>
   <Page title="Event Info">
-
-    <form id="form">
+    <article id="form" class="soft-panel">
       <div class="img-container">
         <img v-if="events.selected['eventImg(s)'][0]" :src="events.selected['eventImg(s)'][0]" alt="Event image" />
         <img v-else :src="heartBackground" alt="Event image" />
       </div>
 
       <div class="info-container">
-        <div class="date"> {{events.selected.time}}</div>
-        <div class="name"> {{events.selected.name}}</div>
-  
-        <div class="sub-title"> Description </div>
-        <div class="description"> {{events.selected.description}}</div>
-  
-        <div class="sub-title"> Tags </div>
-        <ul class="tags">
-          <li v-for="tag in events.selected.tags">{{tag}}</li>
-        </ul>
-        
-  
-        <div class="sub-title"> Organiser </div>
-        <div class="account">
-          <Avatar :username="events.selected.username" custom-class="pfp"/>
-          <div class="text">
-            <div class="username"> {{events.selected.username}} </div>
-            <div class="id"> #{{auth.user.userId.substring(0, 6)}} </div>
+        <p class="date">{{ events.selected.time }}</p>
+        <h2 class="name">{{ events.selected.name }}</h2>
+
+        <section>
+          <p class="sub-title">Description</p>
+          <p class="description">{{ events.selected.description }}</p>
+        </section>
+
+        <section v-if="events.selected.tags?.length">
+          <p class="sub-title">Tags</p>
+          <ul class="tags">
+            <li v-for="tag in events.selected.tags" :key="tag">{{ tag }}</li>
+          </ul>
+        </section>
+
+        <section>
+          <p class="sub-title">Snapshot</p>
+          <div class="meta-grid">
+            <span class="meta-chip">{{ formatEventDate(events.selected.time) }}</span>
+            <span class="meta-chip">{{ events.selected.attendees?.length || 0 }} attending</span>
+            <span class="meta-chip">{{ distanceLabel }}</span>
+            <span class="meta-chip">{{ events.selected.groupId ? 'Group event' : 'Open event' }}</span>
           </div>
-        </div>
-  
-        <div class="sub-title"> Attendees </div>
-        <div class="account" v-for="attendee in events.selected.attendees">
-          <Avatar :username="attendee.username" custom-class="pfp"/>
-          <div class="text">
-            <div class="username"> {{attendee.username}} </div>
-            <div class="id"> #{{attendee.userId.substring(0, 6)}} </div>
+        </section>
+
+        <section>
+          <p class="sub-title">Organiser</p>
+          <div class="account">
+            <Avatar :username="events.selected.username" custom-class="pfp"/>
+            <div class="text">
+              <div class="username">{{ events.selected.username }}</div>
+              <div class="id">#{{ auth.user.userId.substring(0, 6) }}</div>
+            </div>
           </div>
-        </div>
+        </section>
+
+        <section>
+          <p class="sub-title">Attendees</p>
+          <div v-if="events.selected.attendees?.length" class="attendees">
+            <div class="account" v-for="attendee in events.selected.attendees" :key="attendee.userId">
+              <Avatar :username="attendee.username" custom-class="pfp"/>
+              <div class="text">
+                <div class="username">{{ attendee.username }}</div>
+                <div class="id">#{{ attendee.userId.substring(0, 6) }}</div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="section-copy">No attendees yet.</p>
+        </section>
       </div>
+    </article>
 
-      
-    </form>
+    <div class="action-row">
+      <button v-if="isOwner" class="btn btn-danger overview-btn" @click="onDelete">Delete Event</button>
+      <button v-else-if="showJoin" class="btn btn-primary overview-btn" @click="join">Join Event</button>
+      <button v-else class="btn btn-secondary overview-btn" @click="leave">Leave Event</button>
+      <button class="btn btn-secondary overview-btn" @click="saveEvent">{{ isSaved ? 'Saved' : 'Interested' }}</button>
+      <button class="btn btn-secondary overview-btn" @click="copyEventLink">Copy Link</button>
+      <button class="btn btn-secondary overview-btn" @click="backtoMap">Back To Map</button>
+    </div>
 
-    
-    <template v-if="events.selected.userId === auth.user.userId">
-      <button class="overview-btn" @click="onDelete">Delete Event</button>
-    </template>
-    <template v-else>
-      <template v-if="showJoin">
-        <button class="overview-btn" @click="join">Join Event</button>
-      </template>
-      <template v-else>
-        <button class="overview-btn" @click="leave">Leave Event</button>
-      </template>
-    </template>
-    <button class="overview-btn" @click="backtoMap">Back To Map</button>
-    <template v-if="msg === 'OK'">
-      <p class="success-msg">Success!</p>
-    </template>
-    <template v-else>
-      <p class="error-msg">{{ msg }}</p>
-    </template>
-
+    <p v-if="msg === 'OK'" class="success-msg">Success!</p>
+    <p v-else class="error-msg">{{ msg }}</p>
   </Page>
 </template>
 
 <style scoped lang="scss">
 #form {
-  width: 100%;
-  border-radius: 2rem;
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  background-color: var(--background-color);
-  box-shadow: 0px 2px 4px 2px var(--shadow);
   text-align: left;
+
   .img-container {
     width: 100%;
-    height: 40vh;
+    height: clamp(15rem, 34vw, 23rem);
     overflow: hidden;
+
     img {
-      width: 100%; 
-      height: 100%; 
-      object-fit: cover; 
-    }
-  }
-  .info-container {
-    padding: .5rem 1rem 1rem 1rem;
-  }
-  .date {
-    font-size: 14px;
-    font-weight: 400;
-  }
-  .name {
-    font-size: 26px;
-    font-weight: 400;
-    margin: -.5rem 0 .5rem 0;
-  }
-  .sub-title {
-    font-size: 12px;
-    font-weight: 700;
-  }
-  .description, .tags {
-    margin: 0 0 .5rem 0;
-  }
-  .account {
-    height: 3rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: .5rem 0 .5rem 0;
-    .pfp {
+      width: 100%;
       height: 100%;
-      aspect-ratio: 1/1;
-      border-radius: 100%;
-      overflow: hidden;
-      margin: 0 .5rem 0 0;
-    }
-    .text {
-      margin-right: auto;
-      .username {
-        font-size: 20px;
-        font-weight: 400;
-      }
-      .id {
-        font-size: 12px;
-        font-weight: 400;
-      }
+      object-fit: cover;
     }
   }
 
+  .info-container {
+    display: grid;
+    gap: 1rem;
+    padding: 1.15rem;
+  }
+
+  .date {
+    margin: 0;
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .name {
+    margin: -0.4rem 0 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.8rem, 3vw, 2.5rem);
+    line-height: 0.98;
+    letter-spacing: -0.05em;
+  }
+
+  .sub-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .description,
+  .tags {
+    margin: 0;
+    color: var(--ink-soft);
+    line-height: 1.65;
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .tags li {
+    padding: 0.5rem 0.8rem;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-weight: 700;
+  }
+
+  .meta-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+  }
+
+  .meta-chip {
+    padding: 0.5rem 0.8rem;
+    border-radius: var(--radius-pill);
+    background: var(--surface-strong);
+    color: var(--ink);
+    font-weight: 700;
+    border: 1px solid var(--border);
+  }
+
+  .account {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.6rem 0 0;
+    min-height: 3.2rem;
+
+    .pfp {
+      width: 3rem;
+      height: 3rem;
+      border-radius: 100%;
+      overflow: hidden;
+    }
+
+    .text {
+      min-width: 0;
+    }
+
+    .username {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .id {
+      font-size: 0.82rem;
+      color: var(--ink-muted);
+    }
+  }
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .overview-btn {
-  width: 100%;
-  padding: 0.5rem;
-  border-radius: 25px;
-  border: none;
-  color: var(--primary-color);
-  font-weight: bold;
-  cursor: pointer;
-  background-color: var(--prime-color);
-  margin: 0.5rem 0;
-  box-shadow: 0px 2px 4px 2px var(--shadow);
-
-  &:hover {
-    background-color: #000000;
-  }
+  flex: 1 1 12rem;
 }
 
 .success-msg {
-  color: green;
+  color: var(--success);
 }
 
 .error-msg {
-  color: red;
+  color: var(--danger);
+}
+
+@media (max-width: 640px) {
+  .action-row {
+    flex-direction: column;
+  }
 }
 </style>
-

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import base64
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import json
 import logging
 from pathlib import Path
 import re
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 import bcrypt
@@ -28,6 +28,7 @@ repository = (
     else MongoRepository(settings.mongodb_uri, settings.database_name)
 )
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+EVENT_RETENTION_DAYS = 7
 
 app = FastAPI(title="Bee2Gether API")
 api_router = APIRouter(prefix="/api")
@@ -52,7 +53,11 @@ def _user_response(user: dict[str, Any]) -> dict[str, Any]:
 
 
 def _event_response(event: dict[str, Any]) -> dict[str, Any]:
-    return deepcopy(event)
+    payload = deepcopy(event)
+    payload["status"] = _event_status(payload)
+    if payload["status"] == "ended":
+        payload["ongoing"] = False
+    return payload
 
 
 def _group_response(group: dict[str, Any]) -> dict[str, Any]:
@@ -112,6 +117,111 @@ def _remove_group_event(group_id: str, event_id: str) -> None:
         return
     group["events"] = [event for event in group.get("events", []) if event.get("id") != event_id]
     repository.update_group(group)
+
+
+def _event_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, date):
+        return datetime.combine(value, time.max, tzinfo=timezone.utc)
+    if not isinstance(value, str):
+        return None
+
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        if len(raw) == 10:
+            return datetime.combine(date.fromisoformat(raw), time.max, tzinfo=timezone.utc)
+        normalised = raw.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalised)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _event_status(event: dict[str, Any], now: datetime | None = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    event_at = _event_datetime(event.get("time"))
+    if event_at and event_at < now:
+        return "ended"
+    if event.get("ongoing") is False:
+        return "ended"
+    return "upcoming"
+
+
+def _event_is_past_retention(event: dict[str, Any], now: datetime | None = None) -> bool:
+    now = now or datetime.now(timezone.utc)
+    event_at = _event_datetime(event.get("time"))
+    if event_at is None:
+        return False
+    return event_at < (now - timedelta(days=EVENT_RETENTION_DAYS))
+
+
+def _delete_supabase_images(image_urls: list[str]) -> None:
+    if not settings.supabase_url or not settings.supabase_secret_key or not image_urls:
+        return
+
+    bucket_prefix = f"/storage/v1/object/public/{settings.supabase_bucket}/"
+    object_paths: list[str] = []
+    for image_url in image_urls:
+        if not isinstance(image_url, str) or not image_url.startswith(settings.supabase_url):
+            continue
+        parsed = urlparse(image_url)
+        if bucket_prefix not in parsed.path:
+            continue
+        object_path = parsed.path.split(bucket_prefix, 1)[1]
+        if object_path:
+            object_paths.append(object_path)
+
+    if not object_paths:
+        return
+
+    try:
+        requests.delete(
+            f"{settings.supabase_url.rstrip('/')}/storage/v1/object/{quote(settings.supabase_bucket, safe='')}",
+            headers={
+                "Authorization": f"Bearer {settings.supabase_secret_key}",
+                "apikey": settings.supabase_secret_key,
+                "Content-Type": "application/json",
+            },
+            json={"prefixes": object_paths},
+            timeout=20,
+        )
+    except requests.RequestException:
+        logging.warning("Failed to delete Supabase images for expired event", exc_info=True)
+
+
+def _delete_event_and_references(event: dict[str, Any]) -> None:
+    event_id = str(event["id"])
+    repository.delete_event(event_id)
+
+    for user in repository.list_users():
+        if event_id in user.get("eventsAttending", []):
+            user["eventsAttending"] = [item for item in user.get("eventsAttending", []) if item != event_id]
+        if event_id in user.get("savedEvents", []):
+            user["savedEvents"] = [item for item in user.get("savedEvents", []) if item != event_id]
+        repository.update_user(user)
+
+    if event.get("groupId"):
+        _remove_group_event(str(event["groupId"]), event_id)
+
+    _delete_supabase_images(list(event.get("eventImg(s)", [])))
+
+
+def _cleanup_expired_events() -> None:
+    now = datetime.now(timezone.utc)
+    for event in repository.list_events():
+        status = _event_status(event, now)
+        if status == "ended" and event.get("ongoing") is not False:
+            event["ongoing"] = False
+            repository.update_event(event)
+            if event.get("groupId"):
+                _replace_group_event(event["groupId"], event)
+        if _event_is_past_retention(event, now):
+            _delete_event_and_references(event)
 
 
 def _coerce_float(value: Any, field_name: str) -> float:
@@ -215,6 +325,7 @@ async def create_user(request: Request) -> JSONResponse:
             "passwordHash": password_hash,
             "eventsAttending": [],
             "groupsMember": [],
+            "savedEvents": [],
         }
     )
     return JSONResponse({"result": True, "msg": "OK", "userId": user_id})
@@ -291,7 +402,10 @@ async def create_group(request: Request) -> JSONResponse:
 
 @api_router.api_route("/getAllGroups", methods=["GET"])
 def get_all_groups() -> JSONResponse:
+    _cleanup_expired_events()
     groups = [_group_response(group) for group in repository.list_groups()]
+    for group in groups:
+        group["events"] = [_event_response(event) for event in group.get("events", [])]
     if not groups:
         return JSONResponse({"result": True, "msg": "No groups found", "groups": []})
     return JSONResponse({"result": True, "msg": "Groups retrieved successfully", "groups": groups})
@@ -332,7 +446,9 @@ async def get_all_user_groups(request: Request) -> JSONResponse:
     for group_id in user.get("groupsMember", []):
         group = repository.get_group_by_id(group_id)
         if group:
-            groups.append(_group_response(group))
+            payload = _group_response(group)
+            payload["events"] = [_event_response(event) for event in payload.get("events", [])]
+            groups.append(payload)
 
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "memberGroups": groups})
 
@@ -395,6 +511,7 @@ async def create_event(request: Request) -> JSONResponse:
 
 @api_router.api_route("/getMapEvents", methods=["POST"])
 async def get_map_events(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
     payload = await request.json()
     try:
         bottom_left_long = _coerce_float(payload.get("bottomLeftLong"), "coordinate")
@@ -406,6 +523,8 @@ async def get_map_events(request: Request) -> JSONResponse:
 
     events = []
     for event in repository.list_events():
+        if _event_status(event) == "ended":
+            continue
         if (
             bottom_left_long <= float(event.get("long", 0)) <= upper_right_long
             and bottom_left_lat <= float(event.get("lat", 0)) <= upper_right_lat
@@ -416,12 +535,14 @@ async def get_map_events(request: Request) -> JSONResponse:
 
 @api_router.api_route("/searchEvent", methods=["POST"])
 async def search_event(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
     payload = await request.json()
     name = str(payload.get("name", "")).strip()
     if not name:
         return _json_error("Event name not found", 400)
 
     events = repository.search_events_by_name(name, limit=5)
+    events = [event for event in events if _event_status(event) != "ended"]
     if not events:
         return _json_error("Event not found", 400)
     return JSONResponse({"result": True, "msg": "Event found", "events": events})
@@ -489,6 +610,7 @@ async def remove_attending_event(request: Request) -> JSONResponse:
 
 @api_router.api_route("/getAttendingEvents", methods=["POST"])
 async def get_attending_events(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
     payload = await request.json()
     if not payload.get("userId") and not payload.get("username"):
         return _json_error("Username or UserId is required", 400)
@@ -513,8 +635,79 @@ async def get_attending_events(request: Request) -> JSONResponse:
     )
 
 
+@api_router.api_route("/getSavedEvents", methods=["POST"])
+async def get_saved_events(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
+    payload = await request.json()
+    if not payload.get("userId") and not payload.get("username"):
+        return _json_error("Username or UserId is required", 400)
+
+    user = _lookup_user(payload)
+    if user is None:
+        return _json_error("User not found.", 400)
+
+    saved_events = []
+    for event_id in user.get("savedEvents", []):
+        event = repository.get_event_by_id(event_id)
+        if event and _event_status(event) != "ended":
+            saved_events.append(_event_response(event))
+
+    return JSONResponse(
+        {
+            "result": True,
+            "msg": "OK",
+            "userId": user["id"],
+            "savedEvents": saved_events,
+        }
+    )
+
+
+@api_router.api_route("/saveEvent", methods=["POST"])
+async def save_event(request: Request) -> JSONResponse:
+    payload = await request.json()
+    event_id = payload.get("eventId")
+    if not event_id:
+        return _json_error("EventId is required", 400)
+    if not payload.get("userId") and not payload.get("username"):
+        return _json_error("UserId or Username is required", 400)
+
+    try:
+        user = _require_user(payload)
+        _require_event(str(event_id))
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    user.setdefault("savedEvents", [])
+    if event_id in user["savedEvents"]:
+        return JSONResponse({"result": True, "msg": "Event already saved", "eventId": event_id})
+
+    user["savedEvents"].append(event_id)
+    repository.update_user(user)
+    return JSONResponse({"result": True, "msg": "Event saved", "eventId": event_id})
+
+
+@api_router.api_route("/removeSavedEvent", methods=["DELETE"])
+async def remove_saved_event(request: Request) -> JSONResponse:
+    payload = await request.json()
+    event_id = payload.get("eventId")
+    if not event_id:
+        return _json_error("EventId is required", 400)
+    if not payload.get("userId") and not payload.get("username"):
+        return _json_error("UserId or Username is required", 400)
+
+    try:
+        user = _require_user(payload)
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    user["savedEvents"] = [item for item in user.get("savedEvents", []) if item != event_id]
+    repository.update_user(user)
+    return JSONResponse({"result": True, "msg": "Saved event removed", "eventId": event_id})
+
+
 @api_router.api_route("/getEventInfo", methods=["POST"])
 async def get_event_info(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
     payload = await request.json()
     event_id = payload.get("eventId")
     if not event_id:
@@ -527,6 +720,7 @@ async def get_event_info(request: Request) -> JSONResponse:
 
 @api_router.api_route("/getEventImgs", methods=["POST"])
 async def get_event_imgs(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
     payload = await request.json()
     event_id = payload.get("eventId")
     if not event_id:
@@ -548,6 +742,7 @@ async def get_event_imgs(request: Request) -> JSONResponse:
 
 @api_router.api_route("/getEventAttendees", methods=["GET"])
 def get_event_attendees() -> JSONResponse:
+    _cleanup_expired_events()
     event_attendees = [
         {"eventId": event["id"], "attendees": list(event.get("attendees", []))}
         for event in repository.list_events()
@@ -557,6 +752,7 @@ def get_event_attendees() -> JSONResponse:
 
 @api_router.api_route("/getGroupEvents", methods=["POST"])
 async def get_group_events(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
     payload = await request.json()
     group_id = payload.get("groupId")
     if not group_id:
@@ -568,13 +764,14 @@ async def get_group_events(request: Request) -> JSONResponse:
         {
             "result": True,
             "msg": "Events retrieved successfully",
-            "events": list(group.get("events", [])),
+            "events": [_event_response(event) for event in group.get("events", [])],
         }
     )
 
 
 @api_router.api_route("/getAllUserGroupEvents", methods=["POST"])
 async def get_all_user_group_events(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
     payload = await request.json()
     user_id = payload.get("userId")
     if not user_id:
@@ -627,15 +824,7 @@ async def delete_event(request: Request) -> JSONResponse:
     if event is None:
         return _json_error("Event not found", 400)
 
-    repository.delete_event(str(event_id))
-
-    for user in repository.list_users():
-        if event_id in user.get("eventsAttending", []):
-            user["eventsAttending"] = [item for item in user.get("eventsAttending", []) if item != event_id]
-            repository.update_user(user)
-
-    if event.get("groupId"):
-        _remove_group_event(event["groupId"], str(event_id))
+    _delete_event_and_references(event)
 
     return JSONResponse({"result": True, "msg": "Event removed successfully", "eventId": str(event_id)})
 
@@ -719,7 +908,7 @@ async def update_user(request: Request) -> JSONResponse:
         if existing and existing["id"] != user["id"]:
             return _json_error("Username already exists", 400)
         user["username"] = desired_username
-    for field in ("eventsAttending", "groupsMember"):
+    for field in ("eventsAttending", "groupsMember", "savedEvents"):
         if field in payload:
             user[field] = list(payload[field])
     repository.update_user(user)

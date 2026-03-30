@@ -2,31 +2,46 @@
 const { title } = defineProps({
   title: { type: String, required: true },
   customClass: { type: [String, Object, Array], default: "" },
-})
+});
 </script>
 
 <template>
-  <div :class="['viewport', customClass]" id="page-wrapper">
-    <div id="page-title">
+  <section :class="['page-wrapper', customClass]">
+    <header class="page-title">
       <h1>{{ title }}</h1>
-      <hr>
-    </div>
+      <div class="page-title__rule"></div>
+    </header>
     <slot/>
-  </div>
+  </section>
 </template>
 
 <style scoped lang="scss">
-#page-wrapper {
-  padding: 0rem 1rem 0rem 1rem;
+.page-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  gap: 1.25rem;
+  padding: 1.1rem;
 }
-#page-title {
+
+.page-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+
   h1 {
-    text-align: right;
-    font-weight: 300;
-    margin: 2.5rem 0rem 1.5rem;
+    margin: 0;
+    text-align: left;
+    font-family: var(--font-display);
+    font-size: clamp(1.7rem, 2.8vw, 2.4rem);
+    line-height: 1.02;
+    letter-spacing: -0.05em;
   }
-  hr {
-    opacity: 0.25;
+
+  &__rule {
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-strong), transparent);
   }
 }
 </style>

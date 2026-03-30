@@ -1,6 +1,8 @@
 import { reactive } from 'vue';
 import { getAllGroups, createGroup, joinGroup, getGroupsAPI } from '../api';
 import { auth } from '../store/auth';
+import { pages } from './pages';
+import { updateQueryState } from './urlState';
 
 // an object containing groups this user has access to
 export const groups = reactive({
@@ -9,7 +11,40 @@ export const groups = reactive({
     currentGroup: {
         name: '',
     },
-    currentGroupIdForEvents: null
+    currentGroupIdForEvents: null,
+    selectGroup(group, options = {}) {
+        const { openLayer = true, syncUrl = true } = options;
+        groups.currentGroup = group;
+        if (openLayer && !pages.layers.includes('group-overview')) {
+            pages.addLayer('group-overview');
+        }
+        if (syncUrl) {
+            updateQueryState({ group: group?.id ?? null, event: null, tab: pages.selected });
+        }
+    },
+    async selectGroupById(groupId, options = {}) {
+        if (!groupId) {
+            return null;
+        }
+        let group = groups.availableGroups.find((entry) => entry.id === groupId)
+          || groups.userGroups.find((entry) => entry.id === groupId);
+        if (!group) {
+            await updateGroups();
+            group = groups.availableGroups.find((entry) => entry.id === groupId);
+        }
+        if (!group) {
+            return null;
+        }
+        groups.selectGroup(group, options);
+        return group;
+    },
+    clearSelectedGroup(options = {}) {
+        const { syncUrl = true } = options;
+        groups.currentGroup = { name: '' };
+        if (syncUrl) {
+            updateQueryState({ group: null });
+        }
+    }
 });
 
 export async function updateUserGroups(userId){

@@ -171,7 +171,13 @@ function dropLayerandBack() {
 
 <template>
   <Page :title="title">
-    <form class="add-event-form" @submit.prevent>
+    <form class="add-event-form soft-panel" @submit.prevent>
+      <div>
+        <p class="eyebrow">Create event</p>
+        <h2>Make it easy for people to show up.</h2>
+        <p class="section-copy">Set the place, tone, and details clearly so the map preview feels trustworthy at a glance.</p>
+      </div>
+
       <div class="image-upload-container">
         <input id="event-image-input" type="file" accept="image/png, image/jpeg" hidden @change="handleImageUpload" />
         <label
@@ -189,30 +195,41 @@ function dropLayerandBack() {
         </div>
       </div>
 
-      <input v-model="eventName" type="text" placeholder="Event Name" />
-      <input v-model="date" type="date" placeholder="Date" />
+      <label class="field-group">
+        <span>Event name</span>
+        <input v-model="eventName" class="field" type="text" placeholder="Sunset coffee walk" />
+      </label>
+      <label class="field-group">
+        <span>Date</span>
+        <input v-model="date" class="field" type="date" placeholder="Date" />
+      </label>
 
       <div class="location-section">
+        <span class="location-label">Location</span>
         <div class="location-input-row">
           <input
             v-model="locationQuery"
+            class="field"
             type="text"
             placeholder="Search for a location"
             :disabled="searchingLocation"
           />
-          <button type="button" class="inline-btn primary" @click="resolveLocation">
+          <button type="button" class="btn btn-primary inline-btn" @click="resolveLocation">
             <svg-icon :path="mdiMapMarker" width="1.1rem" />
             <span>{{ searchingLocation ? 'Searching...' : 'Find' }}</span>
           </button>
         </div>
-        <button type="button" class="inline-btn secondary" @click="useCurrentLocation">
+        <button type="button" class="btn btn-secondary inline-btn" @click="useCurrentLocation">
           <svg-icon :path="mdiCrosshairsGps" width="1.1rem" />
           <span>Use Current Location</span>
         </button>
         <p v-if="locationStatus" class="location-status">{{ locationStatus }}</p>
       </div>
 
-      <textarea v-model="description" placeholder="Description"></textarea>
+      <label class="field-group">
+        <span>Description</span>
+        <textarea class="textarea" v-model="description" placeholder="Tell people what kind of event this is."></textarea>
+      </label>
 
       <div class="tags-input">
         <div class="tags-list">
@@ -232,161 +249,202 @@ function dropLayerandBack() {
           Press the spacebar after each tag.
           {{ tagsLimit - tags.length }} tags are remaining
         </div>
-        <button type="button" class="remove-all-btn" @click="tags = []">
+        <button type="button" class="btn btn-ghost remove-all-btn" @click="tags = []">
           Remove All
         </button>
       </div>
 
-      <button class="create-btn" @click="createEventListner">Create Event</button>
-      <button class="forget-btn" @click="dropLayerandBack">Forget Event</button>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary create-btn" @click="createEventListner">Create Event</button>
+        <button type="button" class="btn btn-secondary forget-btn" @click="dropLayerandBack">Cancel</button>
+      </div>
     </form>
 
-    <div v-if="errorMsg" class="error-popup">
-      <div class="error-content">
-        <span class="error-icon">⚠️</span>
-        <p class="error-message">{{ errorMsg }}</p>
-        <button class="error-dismiss-btn" @click="errorMsg = ''">Dismiss</button>
-      </div>
+    <div v-if="errorMsg" class="error-popup soft-panel">
+      <p class="error-message">{{ errorMsg }}</p>
+      <button class="btn btn-secondary error-dismiss-btn" @click="errorMsg = ''">Dismiss</button>
     </div>
   </Page>
 </template>
 
 <style scoped lang="scss">
-#page-wrapper {
-  padding: 0rem 1rem 0rem 1rem;
-}
-
-#page-title {
-  h1 {
-    text-align: right;
-    margin: -2rem;
-  }
-
-  hr {
-    opacity: 0.5;
-  }
-}
-
 .add-event-form {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: var(--radius-lg);
 
   h2 {
-    text-align: center;
+    margin: 0.8rem 0 0.55rem;
+    font-family: var(--font-display);
+    font-size: clamp(1.7rem, 3vw, 2.3rem);
+    letter-spacing: -0.05em;
   }
+}
 
-  hr {
-    margin-top: -1rem;
+.image-upload-container {
+  text-align: center;
+}
+
+.image-upload-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-size: cover;
+  background-position: center;
+  border-radius: var(--radius-lg);
+  width: 100%;
+  min-height: 14rem;
+  background: linear-gradient(145deg, var(--canvas-strong), var(--surface));
+  border: 1px dashed var(--border-strong);
+  cursor: pointer;
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+
+  &:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
   }
+}
 
-  .image-upload-container {
-    margin-bottom: 1rem;
-    text-align: center;
-    position: relative;
+.image-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--ink-soft);
+  gap: 0.65rem;
+}
+
+.image-name {
+  margin-top: 0.75rem;
+
+  span {
+    color: var(--ink-muted);
   }
+}
 
-  .image-upload-label {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    background-size: cover;
-    background-position: center;
-    border-radius: 25px;
-    width: 100%;
-    height: 150px;
-    background-color: #d9d9d9;
-    cursor: pointer;
-    transition: background-color 0.3s;
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 
-    &:hover {
-      background-color: #c0c0c0;
-    }
-  }
-
-  .image-name {
-    margin-bottom: -1rem;
-
-    span {
-      color: #919191;
-    }
+  span {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--ink-soft);
   }
 }
 
 .location-section {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  text-align: left;
+  gap: 0.65rem;
+}
+
+.location-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink-soft);
 }
 
 .location-input-row {
   display: flex;
-  gap: 0.5rem;
-
-  input {
-    flex: 1;
-  }
+  gap: 0.65rem;
 }
 
 .inline-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  border: none;
-  border-radius: 1rem;
-  padding: 0.65rem 0.85rem;
-  font-weight: 700;
-  box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.2);
-}
-
-.inline-btn.primary {
-  background-color: #ffc01f;
-  color: #2c2c2c;
-}
-
-.inline-btn.secondary {
-  background-color: #dfefff;
-  color: #1651a4;
+  white-space: nowrap;
 }
 
 .location-status {
-  margin: 0;
+  margin: 0.2rem 0 0;
+  color: var(--secondary);
   font-size: 0.9rem;
-  color: #3a7c3c;
 }
 
-.create-btn,
-.forget-btn,
-.remove-all-btn {
-  border: none;
-  padding: 0.75rem;
-  border-radius: 1.5rem;
+.textarea {
+  min-height: 9rem;
+  resize: vertical;
+}
+
+.tags-input {
+  background: var(--surface-strong);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  padding: 0.85rem;
+  width: 100%;
+  min-height: 9rem;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.tag {
+  display: flex;
+  align-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-radius: var(--radius-pill);
+  padding: 0.45rem 0.75rem;
   font-weight: 700;
-  box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.2);
 }
 
-.create-btn {
-  background-color: #007bff;
-  color: white;
+.delete-tag {
+  background-color: transparent;
+  border: none;
+  margin-left: 0.45rem;
+  cursor: pointer;
+  color: inherit;
 }
 
-.forget-btn {
-  background-color: #f0f0f0;
+.tag-input-field {
+  flex-grow: 1;
+  border: none;
+  outline: none;
+  padding: 0.35rem 0.15rem;
+  background: transparent;
+  color: var(--ink);
 }
 
-.remove-all-btn {
-  background-color: #ffe7aa;
+.tag-instructions {
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  margin-bottom: 0.75rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
 }
 
 .error-popup {
-  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  border-radius: var(--radius-md);
 }
 
 .error-message {
-  color: #b22424;
+  margin: 0;
+  color: var(--danger);
   font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .location-input-row {
+    flex-direction: column;
+  }
+
+  .form-actions,
+  .error-popup {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>

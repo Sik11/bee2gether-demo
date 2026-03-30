@@ -1,5 +1,6 @@
 import unittest
 import os
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -82,6 +83,66 @@ class FastApiCompatibilityTests(unittest.TestCase):
         ).json()
         self.assertTrue(map_events["result"])
         self.assertEqual(len(map_events["events"]), 1)
+        self.assertEqual(map_events["events"][0]["status"], "upcoming")
+
+    def test_expired_events_are_removed_from_discovery_and_storage(self) -> None:
+        user_payload = self.client.put(
+            "/api/createUser",
+            json={"username": "cleanupuser", "password": "testpassword3"},
+        ).json()
+        user_id = user_payload["userId"]
+
+        expired_date = (datetime.now(timezone.utc) - timedelta(days=10)).date().isoformat()
+        fresh_date = (datetime.now(timezone.utc) + timedelta(days=2)).date().isoformat()
+
+        expired_payload = self.client.put(
+            "/api/createEvent",
+            json={
+                "name": "Expired Picnic",
+                "time": expired_date,
+                "long": -1.45,
+                "lat": 50.91,
+                "description": "Old meetup",
+                "tags": ["old"],
+                "userId": user_id,
+            },
+        ).json()
+        self.assertTrue(expired_payload["result"])
+
+        fresh_payload = self.client.put(
+            "/api/createEvent",
+            json={
+                "name": "Fresh Picnic",
+                "time": fresh_date,
+                "long": -1.46,
+                "lat": 50.92,
+                "description": "Upcoming meetup",
+                "tags": ["new"],
+                "userId": user_id,
+            },
+        ).json()
+        self.assertTrue(fresh_payload["result"])
+
+        map_events = self.client.post(
+            "/api/getMapEvents",
+            json={
+                "bottomLeftLong": -2,
+                "bottomLeftLat": 50,
+                "upperRightLong": 0,
+                "upperRightLat": 52,
+            },
+        ).json()
+        self.assertTrue(map_events["result"])
+        self.assertEqual([event["name"] for event in map_events["events"]], ["Fresh Picnic"])
+
+        attending_events = self.client.post(
+            "/api/getAttendingEvents",
+            json={"userId": user_id},
+        ).json()
+        self.assertEqual([event["name"] for event in attending_events["attendingEvents"]], ["Fresh Picnic"])
+
+        self.assertIsNone(repository.get_event_by_id(expired_payload["eventId"]))
+        self.assertIsNotNone(repository.get_event_by_id(fresh_payload["eventId"]))
 
 
 if __name__ == "__main__":

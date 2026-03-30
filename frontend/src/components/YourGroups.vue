@@ -1,33 +1,25 @@
 <script setup>
-import { pages } from '../store/pages'
+import { pages } from '../store/pages';
 import { ref, onMounted, computed } from 'vue';
 import { auth } from '../store/auth';
 import Page from './helper/Page.vue';
 import { getGroups, updateUserGroups, updateGroups } from '../store/groups.js';
 
-const title = "Groups"
-
+const title = "Groups";
 const userId = auth.user.userId;
-
-// Reactive computed property to always get the latest events
 const userGroups = computed(() => getGroups().userGroups);
-
 const allGroups = computed(() => getGroups().availableGroups);
-
-// New reactive variable for tab management
 const activeTab = ref('Your Groups');
 
 onMounted(async () => {
-  updateUserGroups(userId)
-  updateGroups()
+  updateUserGroups(userId);
+  updateGroups();
 });
 
-function groupOverview(group){
-  getGroups().currentGroup = group;
-  pages.addLayer('group-overview');
+function groupOverview(group) {
+  getGroups().selectGroup(group);
 }
 
-// Function to switch tabs
 const switchTab = (tabName) => {
   activeTab.value = tabName;
 };
@@ -35,165 +27,131 @@ const switchTab = (tabName) => {
 
 <template>
   <Page :title="title">
-    <!-- Tab Controls -->
-    <div class="tab-controls">
-      <button :class="{ active: activeTab === 'All Groups' }" @click="switchTab('All Groups')">
+    <section class="summary soft-panel">
+      <div>
+        <p class="eyebrow">Groups</p>
+        <h2 class="section-title">{{ activeTab === 'Your Groups' ? userGroups.length : allGroups.length }} groups in view</h2>
+      </div>
+      <button type="button" class="btn btn-primary" @click="pages.addLayer('create-group')">
+        Create Group
+      </button>
+    </section>
+
+    <div class="tab-controls soft-panel">
+      <button :class="['tab-btn', { active: activeTab === 'All Groups' }]" @click="switchTab('All Groups')">
         All Groups
       </button>
-      <button :class="{ active: activeTab === 'Your Groups' }" @click="switchTab('Your Groups')">
+      <button :class="['tab-btn', { active: activeTab === 'Your Groups' }]" @click="switchTab('Your Groups')">
         Your Groups
       </button>
     </div>
 
-    <!-- Groups Container -->
     <div class="groups-container">
-      <!-- Container for 'Your Groups' -->
-      <div v-if="activeTab === 'Your Groups'">
-        <div v-for="group in userGroups" :key="group.id" class="group-card">
-          <div class="group-info">
-            <div class="group-name">{{ group.name }}</div>
+      <article v-for="group in activeTab === 'Your Groups' ? userGroups : allGroups" :key="group.id" class="group-card soft-panel">
+        <div class="group-copy">
+          <div class="group-badges">
+            <span class="group-kicker">{{ group.userId === userId ? 'Owned' : activeTab === 'Your Groups' ? 'Member' : 'Community group' }}</span>
+            <span class="group-kicker">{{ group.memberCount || 0 }} members</span>
+            <span class="group-kicker">{{ group.upcomingEventCount || 0 }} upcoming</span>
           </div>
-          <button class="more-info-btn"  @click="groupOverview(group)">More info...</button>
+          <h3 class="group-name">{{ group.name }}</h3>
+          <p class="group-description">{{ group.description || 'No description yet.' }}</p>
         </div>
-      </div>
-
-      <!-- Container for 'All Groups' -->
-      <div v-if="activeTab === 'All Groups'">
-        <div v-for="group in allGroups" :key="group.id" class="group-card">
-          <div class="group-info">
-            <div class="group-name">{{ group.name }}</div>
-          </div>
-          <button class="more-info-btn" @click="groupOverview(group)">More info...</button>
-        </div>
-      </div>
+        <button class="btn btn-secondary more-info-btn" @click="groupOverview(group)">View group</button>
+      </article>
     </div>
-
-    <button type="button" class="create-group-btn" @click="pages.addLayer('create-group')">
-      Create New Group
-    </button>
   </Page>
 </template>
 
-
 <style scoped lang="scss">
+.summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.25rem;
+  border-radius: var(--radius-lg);
+}
+
 .groups-container {
-  padding: 1rem;
-  max-height: 65vh; // Adjust height calculation as needed
-  overflow-y: auto;
+  display: grid;
+  gap: 1rem;
 }
 
 .group-card {
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: var(--radius-lg);
   padding: 1rem;
-  height: 15vh;
-  margin-bottom: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: box-shadow 0.3s ease;
-
-  &:hover {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-  }
 }
 
-.group-image {
-  flex-shrink: 0;
-  width: 100px; // Set width of image box
-  height: 100px; // Set height of image box
-  border-radius: 8px;
-  overflow: hidden;
-  margin-right: 1rem;
-
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover; // Ensures image covers the box
-  }
+.group-copy {
+  min-width: 0;
 }
 
+.group-kicker {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+}
 
-
-.group-info {
-  flex-grow: 1;
+.group-badges {
   display: flex;
-  flex-direction: column;
-  justify-content: left;
-}
-
-.group-date {
-  font-size: 0.85rem;
-  color: #666;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .group-name {
-  font-weight: bold;
+  margin: 0.35rem 0 0.5rem;
+  font-size: 1.25rem;
+}
+
+.group-description {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.55;
 }
 
 .more-info-btn {
-  border: none;
-  background-color: transparent;
-  color: #FFC01F;
-  cursor: pointer;
-  align-self: flex-end;
-}
-
-.create-group-btn {
-  // Existing styles
-  bottom: 20px; // Adjust position from bottom
-}
-
-
-.create-group-btn {
-  background-color: #FFC01F;
-  /* Replace with the specific color you need */
-  color: white;
-  font-weight: bold;
-  border: none;
-  border-radius: 30px;
-  /* Adjust as needed */
-  padding: 15px 30px;
-  width: 90%;
-  /* Adjust to match your layout */
-  position: fixed;
-  bottom: 5rem;
-  /* Center the button */
-  display: block;
-  left: 50%;
-  text-transform: uppercase;
-  /* Optional: Makes text uppercase */
-  transform: translateX(-50%);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-  /* Optional: Adds a shadow */
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-  /* Optional: Adds a transition effect */
-}
-
-.create-group-btn:hover {
-  background-color: #e6b800;
-  /* Darker shade for hover state */
+  white-space: nowrap;
 }
 
 .tab-controls {
   display: flex;
-  justify-content: center;
-  margin-bottom: 1rem;
+  gap: 0.5rem;
+  align-items: center;
+  width: fit-content;
+  padding: 0.35rem;
+  border-radius: var(--radius-pill);
 }
 
-.tab-controls button {
-  padding: 0.5rem 1rem;
-  border: none;
-  background-color: transparent;
+.tab-btn {
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 700;
   cursor: pointer;
-  font-weight: bold;
-  margin: 0 0.5rem;
 }
 
-.tab-controls button.active {
-  color: #FFC01F;
-  border-bottom: 2px solid #FFC01F;
+.tab-btn.active {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .summary,
+  .group-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>

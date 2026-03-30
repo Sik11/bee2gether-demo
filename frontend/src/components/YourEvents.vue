@@ -1,146 +1,228 @@
 <script setup>
-import { ref, onMounted,computed } from 'vue';
+import { onMounted, computed } from 'vue';
 import { pages } from '../store/pages';
 import Page from './helper/Page.vue';
-import { getEvents, updateUserEvents } from '../store/events.js';
+import { getEvents, updateSavedEvents, updateUserEvents } from '../store/events.js';
 import { auth } from '../store/auth';
+import { userLocation } from '../store/userLocation';
+import heartBackground from '../assets/heart-background.png';
+import { formatDistanceLabel, formatEventDate } from '../utils/eventMeta';
 
-const title = "Your Events"
-
+const title = "Your Events";
 const userId = auth.user.userId;
-
-// Reactive computed property to always get the latest events
 const userEvents = computed(() => getEvents().userEvents);
+const savedEvents = computed(() => getEvents().savedEvents);
+const ownedEventIds = computed(() => new Set(userEvents.value.filter((event) => event.userId === userId).map((event) => event.id)));
 
 onMounted(async () => {
-  updateUserEvents(userId)
+  updateUserEvents(userId);
+  updateSavedEvents(userId);
 });
 
 function clickedEvent(event) {
-  getEvents().selected = event;
-  pages.addLayer('event-overview');
+  getEvents().selectEvent(event);
 }
-
 </script>
 
 <template>
   <Page :title="title">
-    <div class="events-container">
-      <div v-for="event in userEvents" :key="event.id" class="event-card">
-        <div v-if="event['eventImg(s)'][0]" class="event-image">
-          <img :src="event['eventImg(s)'][0]" alt="Event image" />
-        </div>
-        <div v-else class="event-image"> 
-          <img src="../assets/heart-background.png" alt="Placeholder image" />
-        </div>
-        <div class="event-info">
-          <div class="event-date">{{ new Date(event.time).toLocaleDateString() }}</div>
-          <div class="event-name">{{ event.name }}</div>
-        </div>
-        <button class="more-info-btn" @click="clickedEvent(event)">More info...</button>
+    <section class="summary soft-panel">
+      <div>
+        <p class="eyebrow">Your plans</p>
+        <h2 class="section-title">{{ userEvents.length + savedEvents.length }} active items across attending and saved</h2>
+      </div>
+      <button type="button" class="btn btn-primary" @click="pages.addLayer('create-event')">Create Event</button>
+    </section>
+
+    <div class="events-section">
+      <div class="section-heading">
+        <h3>Attending</h3>
+        <p class="section-copy">Plans you created or joined.</p>
+      </div>
+
+      <div v-if="!userEvents.length" class="empty-state soft-panel">
+        <h3>No attending events yet</h3>
+        <p class="section-copy">Start with one plan and Bee2Gether will give your map something to discover.</p>
+      </div>
+
+      <div v-else class="events-container">
+        <article v-for="event in userEvents" :key="event.id" class="event-card soft-panel">
+          <div class="event-image">
+            <img :src="event['eventImg(s)'][0] || heartBackground" alt="Event image" />
+          </div>
+          <div class="event-copy">
+            <div class="event-badges">
+              <span class="event-badge">{{ ownedEventIds.has(event.id) ? 'Owned' : 'Joined' }}</span>
+              <span class="event-badge">{{ event.groupId ? 'Group event' : 'Open event' }}</span>
+            </div>
+            <p class="event-date">{{ formatEventDate(event.time) }}</p>
+            <h3 class="event-name">{{ event.name }}</h3>
+            <p class="event-description">{{ event.description || 'No description yet.' }}</p>
+            <p class="event-meta">{{ event.attendees?.length || 0 }} attending · {{ formatDistanceLabel(userLocation.location, event) }}</p>
+          </div>
+          <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
+        </article>
       </div>
     </div>
 
-    <!-- Button placed outside the .events-container to fix it at the bottom -->
-    <button type="button" class="create-event-btn" @click="pages.addLayer('create-event')">
-      Create New Event
-    </button> 
+    <div class="events-section">
+      <div class="section-heading">
+        <h3>Saved</h3>
+        <p class="section-copy">Events you marked as interesting without joining.</p>
+      </div>
+
+      <div v-if="!savedEvents.length" class="empty-state soft-panel">
+        <h3>No saved events yet</h3>
+        <p class="section-copy">Use the Interested action on any event to keep it close without joining it.</p>
+      </div>
+
+      <div v-else class="events-container">
+        <article v-for="event in savedEvents" :key="`saved-${event.id}`" class="event-card soft-panel">
+          <div class="event-image">
+            <img :src="event['eventImg(s)'][0] || heartBackground" alt="Event image" />
+          </div>
+          <div class="event-copy">
+            <div class="event-badges">
+              <span class="event-badge">Saved</span>
+              <span class="event-badge">{{ event.groupId ? 'Group event' : 'Open event' }}</span>
+            </div>
+            <p class="event-date">{{ formatEventDate(event.time) }}</p>
+            <h3 class="event-name">{{ event.name }}</h3>
+            <p class="event-description">{{ event.description || 'No description yet.' }}</p>
+          </div>
+          <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
+        </article>
+      </div>
+    </div>
   </Page>
 </template>
 
 <style scoped lang="scss">
+.summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.25rem;
+  border-radius: var(--radius-lg);
+}
+
+.summary h2 {
+  font-size: clamp(1.55rem, 2.6vw, 2.1rem);
+}
 
 .events-container {
-  padding: 1rem;
-  max-height: 65vh; // Adjust height calculation as needed
-  overflow-y: auto;
+  display: grid;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.events-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.section-heading h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
 }
 
 .event-card {
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  padding: 1rem;
-  height: 15vh;
-  margin-bottom: 1rem;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+  gap: 1rem;
   align-items: center;
-  transition: box-shadow 0.3s ease;
-
-  &:hover {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-  }
+  padding: 1rem;
+  border-radius: var(--radius-lg);
 }
 
 .event-image {
-  flex-shrink: 0;
-  width: 100px; // Set width of image box
-  height: 100px; // Set height of image box
-  border-radius: 8px;
+  width: 7.5rem;
+  aspect-ratio: 1 / 1;
   overflow: hidden;
-  margin-right: 1rem;
+  border-radius: var(--radius-md);
 
   img {
     width: 100%;
     height: 100%;
-    object-fit: cover; // Ensures image covers the box
+    object-fit: cover;
   }
 }
 
+.event-copy {
+  min-width: 0;
+}
 
-
-.event-info {
-  flex-grow: 1;
+.event-badges {
   display: flex;
-  flex-direction: column;
-  justify-content: left;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.event-badge {
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+  font-size: 0.78rem;
 }
 
 .event-date {
-  font-size: 0.85rem;
-  color: #666;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .event-name {
-  font-weight: bold;
+  margin: 0.35rem 0 0.5rem;
+  font-size: 1.25rem;
+  line-height: 1.05;
+}
+
+.event-description {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.event-meta {
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
 }
 
 .more-info-btn {
-  border: none;
-  background-color: transparent;
-  color: #FFC01F;
-  cursor: pointer;
-  align-self: flex-end;
+  white-space: nowrap;
 }
 
-.create-event-btn {
-  // Existing styles
-  bottom: 20px; // Adjust position from bottom
+.empty-state {
+  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  text-align: left;
 }
 
-
-.create-event-btn {
-  background-color: #FFC01F; /* Replace with the specific color you need */
-  color: white;
-  font-weight: bold;
-  border: none;
-  border-radius: 30px; /* Adjust as needed */
-  padding: 15px 30px;
-  width: 90%; /* Adjust to match your layout */
-  position: fixed;
-  bottom: 5rem; /* Center the button */
-  display: block;
-  left: 50%;
-  text-transform: uppercase; /* Optional: Makes text uppercase */
-  transform: translateX(-50%);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* Optional: Adds a shadow */
-  cursor: pointer;
-  transition: background-color 0.3s ease; /* Optional: Adds a transition effect */
+.empty-state h3 {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-display);
 }
 
-.create-event-btn:hover {
-  background-color: #e6b800; /* Darker shade for hover state */
-}
+@media (max-width: 820px) {
+  .summary {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
+  .event-card {
+    grid-template-columns: 1fr;
+  }
+
+  .event-image {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+  }
+}
 </style>

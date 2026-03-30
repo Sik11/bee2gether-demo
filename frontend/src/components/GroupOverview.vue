@@ -1,11 +1,12 @@
 <script setup>
 import { computed } from 'vue';
-import { pages } from '../store/pages'
-import { groups, joinUserGroup } from "../store/groups.js";  // Import joinUserGroup
+import { pages } from '../store/pages';
+import { groups, joinUserGroup } from "../store/groups.js";
 import Page from './helper/Page.vue';
+import { events } from '../store/events.js';
+import heartBackground from '../assets/heart-background.png';
 import { auth } from '../store/auth';
-import { getEvents } from '../store/events.js';
-
+import { formatEventDate } from '../utils/eventMeta';
 
 const emit = defineEmits(['backToMap']);
 
@@ -13,171 +14,173 @@ const isGroupJoined = computed(() => {
   return groups.userGroups.some(userGroup => userGroup.id === groups.currentGroup.id);
 });
 
-const title = groups.currentGroup.name;
-
-// Updated joinGroup function to use joinUserGroup
 async function joinGroup() {
-    if (!isGroupJoined.value) {
-        console.log("Joining group");
-        const response = await joinUserGroup(groups.currentGroup.id);
-        if (response.result) {
-            console.log("Joined group successfully");
-            // Optionally, emit an event or take additional action upon successful join
-        } else {
-            console.error(response.msg || "Failed to join group");
-        }
-    } else {
-        console.log("Already in group");
-    }
+  if (!isGroupJoined.value) {
+    await joinUserGroup(groups.currentGroup.id);
+  }
 }
 
 function backtoMap() {
-    pages.dropLayer();
-    emit("backToMap");
+  groups.clearSelectedGroup();
+  pages.dropLayer();
+  emit("backToMap");
 }
 
 function clickedEvent(event) {
-  getEvents().selected = event;
-  pages.addLayer('event-overview');
+  events.selectEvent(event);
 }
 
-const groupEvents = computed(() => {
-    return groups.currentGroup.events;
-});
+const groupEvents = computed(() => groups.currentGroup.events);
+const currentTitle = computed(() => groups.currentGroup.name);
+const isOwner = computed(() => groups.currentGroup.userId === auth.user.userId);
 
-const currentTitle = computed(() => {
-    return groups.currentGroup.name;
-});
-
-function createGroupEvent(){
-    groups.currentGroupIdForEvents = groups.currentGroup.id;
-    pages.addLayer('create-event');
+function createGroupEvent() {
+  groups.currentGroupIdForEvents = groups.currentGroup.id;
+  pages.addLayer('create-event');
 }
 </script>
 
 <template>
   <Page :title="currentTitle">
-    <form class="event-overview-form">
-        <h2>Description</h2>
-        <p>{{ groups.currentGroup.description }}</p>
-    </form>
-    <button v-if="!isGroupJoined" class="overview-btn" @click="joinGroup">Join</button>
-    <button v-else type="button" class="overview-btn" @click="createGroupEvent">
-      Create Group Event
-    </button>
-    <button class="overview-btn" @click="backtoMap">Back</button>
-    <div class="events-container">
-      <div v-for="event in groupEvents" :key="event.id" class="event-card">
-        <div v-if="event['eventImg(s)'][0]" class="event-image">
-          <img :src="event['eventImg(s)'][0]" alt="Event image" />
-        </div>
-        <div v-else class="event-image"> 
-          <img src="../assets/heart-background.png" alt="Placeholder image" />
-        </div>
-        <div class="event-info">
-          <div class="event-date">{{ new Date(event.time).toLocaleDateString() }}</div>
-          <div class="event-name">{{ event.name }}</div>
-        </div>
-        <button class="more-info-btn"  @click="clickedEvent(event)" >More info...</button>
+    <section class="group-overview-form soft-panel">
+      <p class="eyebrow">Group overview</p>
+      <h2>{{ groups.currentGroup.name }}</h2>
+      <p class="section-copy">{{ groups.currentGroup.description }}</p>
+      <div class="group-meta">
+        <span class="meta-chip">{{ groups.currentGroup.memberCount || 0 }} members</span>
+        <span class="meta-chip">{{ groups.currentGroup.upcomingEventCount || 0 }} upcoming events</span>
+        <span class="meta-chip">{{ isOwner ? 'You own this group' : 'Joined group' }}</span>
       </div>
+    </section>
+
+    <div class="action-row">
+      <button v-if="!isGroupJoined" class="btn btn-primary overview-btn" @click="joinGroup">Join group</button>
+      <button v-else type="button" class="btn btn-primary overview-btn" @click="createGroupEvent">
+        Create group event
+      </button>
+      <button class="btn btn-secondary overview-btn" @click="backtoMap">Back</button>
+    </div>
+
+    <div v-if="!groupEvents?.length" class="empty-state soft-panel">
+      <h3>No group events yet</h3>
+      <p class="section-copy">Create the first shared plan for this group and it will appear here.</p>
+    </div>
+
+    <div v-else class="events-container">
+      <article v-for="event in groupEvents" :key="event.id" class="event-card soft-panel">
+        <div class="event-image">
+          <img :src="event['eventImg(s)'][0] || heartBackground" alt="Event image" />
+        </div>
+        <div class="event-copy">
+          <p class="event-date">{{ new Date(event.time).toLocaleDateString() }}</p>
+          <h3 class="event-name">{{ event.name }}</h3>
+          <p class="event-description">{{ formatEventDate(event.time) }} · {{ event.attendees?.length || 0 }} attending</p>
+        </div>
+        <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
+      </article>
     </div>
   </Page>
 </template>
 
-
 <style scoped lang="scss">
+.group-overview-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.25rem;
+  border-radius: var(--radius-lg);
 
-.event-overview-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    h2 {
-        margin: 0;
-        margin-bottom: 20px;
-        font-weight: bold;
-    }
+  h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.8rem, 3vw, 2.4rem);
+    letter-spacing: -0.05em;
+  }
+}
+
+.group-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.meta-chip {
+  padding: 0.5rem 0.8rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .overview-btn {
-    width: 100%; /* Full width buttons */
-    padding: 0.5rem; /* Padding inside buttons */
-    border-radius: 25px; /* Rounded corners for buttons */
-    border: none; /* No border for buttons */
-    color: white; /* Text color for buttons */
-    font-weight: bold; /* Bold font for button text */
-    cursor: pointer; /* Cursor change for hover */
-    background-color: #FFC01F;
-    margin: 0.5rem 0;
+  flex: 1 1 12rem;
+}
 
-    &:hover {
-        background-color: #000000;
-    }
-  }
-
-
-  .events-container {
-  padding: 1rem;
-  max-height: 65vh; // Adjust height calculation as needed
-  overflow-y: auto;
+.events-container {
+  display: grid;
+  gap: 1rem;
 }
 
 .event-card {
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: var(--radius-lg);
   padding: 1rem;
-  height: 15vh;
-  margin-bottom: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: box-shadow 0.3s ease;
-
-  &:hover {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-  }
 }
 
 .event-image {
-  flex-shrink: 0;
-  width: 100px; // Set width of image box
-  height: 100px; // Set height of image box
-  border-radius: 8px;
+  width: 5.5rem;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-md);
   overflow: hidden;
   margin-right: 1rem;
 
   img {
     width: 100%;
     height: 100%;
-    object-fit: cover; // Ensures image covers the box
+    object-fit: cover;
   }
 }
 
-
-
-.event-info {
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: left;
+.event-copy {
+  min-width: 0;
+  margin-right: auto;
 }
 
 .event-date {
-  font-size: 0.85rem;
-  color: #666;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
 }
 
 .event-name {
-  font-weight: bold;
+  margin: 0.4rem 0 0;
+  font-weight: 700;
 }
 
-.more-info-btn {
-  border: none;
-  background-color: transparent;
-  color: #FFC01F;
-  cursor: pointer;
-  align-self: flex-end;
+.event-description {
+  margin: 0.35rem 0 0;
+  color: var(--ink-soft);
 }
 
+.empty-state {
+  padding: 1.35rem;
+  border-radius: var(--radius-lg);
+}
+
+@media (max-width: 720px) {
+  .action-row,
+  .event-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 </style>
-

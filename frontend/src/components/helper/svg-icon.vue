@@ -20,6 +20,7 @@ const props = defineProps({
       :id="id" :class="customClass"
       viewBox="0 0 25 25"
       preserveAspectRatio="xMidYMid meet"
+      fill="currentColor"
     >
       <path :d="path" />
     </svg>

@@ -1,6 +1,55 @@
 import { reactive } from "vue";
 import { createUser, loginUser } from "../api";
 
+const STORAGE_KEY = "bee2gether.auth";
+
+function loadStoredAuth() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed?.isLoggedIn && parsed?.user?.username) {
+      return parsed;
+    }
+  } catch (error) {
+    console.warn("Failed to restore auth state", error);
+  }
+  return null;
+}
+
+function persistAuthState(state) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      user: state.user,
+      isLoggedIn: state.isLoggedIn,
+    }));
+  } catch (error) {
+    console.warn("Failed to persist auth state", error);
+  }
+}
+
+function clearAuthState() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch (error) {
+    console.warn("Failed to clear auth state", error);
+  }
+}
+
 const initialState = {
   user: {
     username: 'PLEASELOGIN'
@@ -8,11 +57,13 @@ const initialState = {
   isLoggedIn: false
 };
 
+const restoredState = loadStoredAuth();
+
 /**
  * 
  */
 export const auth = reactive({
-  ...initialState,
+  ...(restoredState ?? initialState),
 
   /**
    * Attempt to register the account details
@@ -26,7 +77,7 @@ export const auth = reactive({
       if (result && userId) {
         auth.user = { username, userId };
         auth.isLoggedIn = true;
-        console.log(auth.user)
+        persistAuthState(auth);
         return { result, msg };
       } else {
         return { result: false, msg: msg || 'Registration failed' };
@@ -48,6 +99,7 @@ export const auth = reactive({
       if (result && userId) {
         auth.user = { username, userId };
         auth.isLoggedIn = true;
+        persistAuthState(auth);
         return { result, msg };
       } else {
         return { result: false, msg: msg || 'Login failed' };
@@ -63,5 +115,6 @@ export const auth = reactive({
    */
   logout() {
     Object.assign(auth, initialState);
+    clearAuthState();
   },
 });

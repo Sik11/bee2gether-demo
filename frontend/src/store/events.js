@@ -10,15 +10,27 @@ import {
   deleteEvent,
   uploadEventImage,
   attendingEvents,
-  getUserGroupEvents
+  getUserGroupEvents,
+  getEvent,
+  saveEvent as saveEventApi,
+  removeSavedEvent as removeSavedEventApi,
+  getSavedEvents as getSavedEventsApi,
 } from "../api.js";
 import { auth } from '../store/auth';
+import { pages } from "./pages";
+import { updateQueryState } from "./urlState";
 
 const initialState = {
   availableEvents: [],
   eventAttendees: [],
   userEvents: [],
   groupEvents: [],
+  savedEvents: [],
+  filters: {
+    window: "all",
+    groupsOnly: false,
+    tag: "all",
+  },
 
   selected: {
     name: undefined,
@@ -50,7 +62,6 @@ export const events = reactive({
       ...event,
       attendees: findEventAttendees(event.id)
     }
-    console.log(events.selected)
   },
 
   getSelected() {
@@ -69,8 +80,118 @@ export const events = reactive({
         console.error(err)
       })
     return promise
+  },
+
+  async updateAvailableEvents(lat = getUserLocation().location.lat, lng = getUserLocation().location.lng) {
+    const { bottom_left_lat, bottom_left_long, top_right_lat, top_right_long } =
+      getBounds({ lat, lng }, events.radius);
+
+    try {
+      const response = await getMapEvents(bottom_left_long, bottom_left_lat, top_right_long, top_right_lat);
+      events.availableEvents = response.events || [];
+      return response;
+    } catch (error) {
+      console.error(error);
+      return { result: false, msg: error.message, events: [] };
+    }
   }
 });
+
+events.selectEvent = function selectEvent(event, options = {}) {
+  const { openLayer = true, syncUrl = true } = options;
+  events.selected = {
+    ...event,
+    attendees: findEventAttendees(event.id)
+  };
+  if (openLayer && !pages.layers.includes("event-overview")) {
+    pages.addLayer("event-overview");
+  }
+  if (syncUrl) {
+    updateQueryState({ event: event?.id ?? null, group: null, tab: pages.selected });
+  }
+};
+
+events.clearSelectedEvent = function clearSelectedEvent(options = {}) {
+  const { syncUrl = true } = options;
+  events.selected = { ...initialState.selected };
+  if (syncUrl) {
+    updateQueryState({ event: null });
+  }
+};
+
+events.setFilterWindow = function setFilterWindow(value) {
+  events.filters.window = value;
+};
+
+events.toggleGroupsOnly = function toggleGroupsOnly() {
+  events.filters.groupsOnly = !events.filters.groupsOnly;
+};
+
+events.setTagFilter = function setTagFilter(value) {
+  events.filters.tag = value;
+};
+
+events.getAvailableTags = function getAvailableTags() {
+  const tags = new Set();
+  for (const event of events.availableEvents) {
+    for (const tag of event.tags || []) {
+      if (tag) {
+        tags.add(tag);
+      }
+    }
+  }
+  return ["all", ...Array.from(tags).sort((a, b) => a.localeCompare(b))];
+};
+
+events.getFilteredAvailableEvents = function getFilteredAvailableEvents() {
+  const now = new Date();
+  const endOfWeek = new Date(now);
+  endOfWeek.setDate(now.getDate() + 7);
+
+  return events.availableEvents.filter((event) => {
+    const eventTime = event?.time ? new Date(event.time) : null;
+    const inToday = eventTime && eventTime.toDateString() === now.toDateString();
+    const inWeek = eventTime && eventTime >= now && eventTime <= endOfWeek;
+
+    if (events.filters.window === "today" && !inToday) {
+      return false;
+    }
+    if (events.filters.window === "week" && !inWeek) {
+      return false;
+    }
+    if (events.filters.groupsOnly && !event.groupId) {
+      return false;
+    }
+    if (events.filters.tag !== "all" && !(event.tags || []).includes(events.filters.tag)) {
+      return false;
+    }
+    return true;
+  });
+};
+
+events.isEventSaved = function isEventSaved(eventId) {
+  return events.savedEvents.some((event) => event.id === eventId);
+};
+
+events.selectEventById = async function selectEventById(eventId, options = {}) {
+  if (!eventId) {
+    return null;
+  }
+
+  let event = events.availableEvents.find((entry) => entry.id === eventId)
+    || events.userEvents.find((entry) => entry.id === eventId)
+    || events.groupEvents.find((entry) => entry.id === eventId)
+    || events.savedEvents.find((entry) => entry.id === eventId);
+  if (!event) {
+    const response = await getEvent(eventId);
+    event = response?.event || response?.eventInfo || null;
+  }
+  if (!event) {
+    return null;
+  }
+  events.selectEvent(event, options);
+  return event;
+};
 
 export async function updateUserEvents(userId) {
   try {
@@ -81,6 +202,17 @@ export async function updateUserEvents(userId) {
       getEvents().userEvents = response.attendingEvents;
     } else {
       console.error(response.msg || 'Failed to get user events');
+    }
+  } catch (error) {
+    console.error(error.message);
+  }
+}
+
+export async function updateSavedEvents(userId) {
+  try {
+    const response = await getSavedEventsApi(userId);
+    if (response.result) {
+      events.savedEvents = response.savedEvents || [];
     }
   } catch (error) {
     console.error(error.message);
@@ -101,6 +233,12 @@ function getBounds(position, radius) {
   };
 }
 
+function hasUsableLocation(position) {
+  return Number.isFinite(position?.lat)
+    && Number.isFinite(position?.lng)
+    && (position.lat !== 0 || position.lng !== 0);
+}
+
 // track if polling is already happening
 let polling = false;
 
@@ -114,15 +252,17 @@ export function startPollingEvents() {
   console.log("starting polling events");
   polling = true;
 
-  setInterval(() => {
-    console.log("polling events");
-    const { bottom_left_lat, bottom_left_long, top_right_lat, top_right_long } =
-      getBounds(getUserLocation().location, getEvents().radius);
-      getMapEvents(bottom_left_long, bottom_left_lat, top_right_long, top_right_lat)
-        .then((response) => {
-            getEvents().availableEvents = response.events;
-        })
-  }, 10000);
+  const pollEvents = () => {
+    const currentLocation = getUserLocation().location;
+    if (!hasUsableLocation(currentLocation)) {
+      return;
+    }
+
+    getEvents().updateAvailableEvents(currentLocation.lat, currentLocation.lng);
+  };
+
+  pollEvents();
+  setInterval(pollEvents, 10000);
 }
 
 export function startPollingEventAttendees() {
@@ -180,6 +320,7 @@ export async function addEvent(eventData, imageFile) {
         }
       }
       await updateUserEvents(eventData.userId);
+      await updateSavedEvents(eventData.userId);
 
       const eventAttendees = {
         eventId: eventId,
@@ -207,6 +348,7 @@ export async function removeEvent(eventID, userID) {
         (event) => event.id !== eventID
       );
       await updateUserEvents(userID);
+      await updateSavedEvents(userID);
       return { result, msg };
     } else {
       return { result: false, msg: msg || "Event deletion failed" };
@@ -218,11 +360,8 @@ export async function removeEvent(eventID, userID) {
 }
 
 export async function sendJoinEvent(userID, username, eventID) {
-  console.log(`Joining event ${eventID}`);
-  console.log(userID);
   try {
     const { result, msg, userId, eventId } = await joinEvent(userID, eventID);
-    console.log(result, msg, userId, eventId);
     if (result && userId && eventId) {
       const foundEventIndex = getEvents().eventAttendees.findIndex(
         (event) => event.eventId === eventId
@@ -243,6 +382,7 @@ export async function sendJoinEvent(userID, username, eventID) {
       }
       console.log(`Successfully joined event ${eventId}`);
       await updateUserEvents(userID);
+      await updateSavedEvents(userID);
       return { result, msg };
     } else {
       console.log(`Failed to join event ${eventId}`);
@@ -280,6 +420,7 @@ export async function sendLeaveEvent(userID, eventID) {
 
       console.log(`Successfully left event ${eventId}`);
       await updateUserEvents(userID);
+      await updateSavedEvents(userID);
       return { result, msg };
     } else {
       console.log(`Failed to leave event ${eventId}`);
@@ -288,5 +429,20 @@ export async function sendLeaveEvent(userID, eventID) {
   } catch (err) {
     console.error(err);
     return { result: false, msg: err.message };
+  }
+}
+
+export async function toggleSavedEvent(userId, eventId) {
+  try {
+    const response = events.isEventSaved(eventId)
+      ? await removeSavedEventApi(userId, eventId)
+      : await saveEventApi(userId, eventId);
+    if (response.result) {
+      await updateSavedEvents(userId);
+    }
+    return response;
+  } catch (error) {
+    console.error(error);
+    return { result: false, msg: error.message };
   }
 }

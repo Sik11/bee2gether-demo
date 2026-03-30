@@ -172,6 +172,15 @@ export const getGroupsAPI = async (userId) =>
 export const getGroupEvents = async (groupId) => 
   createRequestFunction('getGroupEvents', 'POST', {groupId})()
 
+export const saveEvent = async (userId, eventId) =>
+  createRequestFunction('saveEvent', 'POST', { userId, eventId })()
+
+export const removeSavedEvent = async (userId, eventId) =>
+  createRequestFunction('removeSavedEvent', 'DELETE', { userId, eventId })()
+
+export const getSavedEvents = async (userId) =>
+  createRequestFunction('getSavedEvents', 'POST', { userId })()
+
 /**
  * get all the groups events for a user
  * @param {string} userId
