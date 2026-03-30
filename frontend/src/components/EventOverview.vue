@@ -1,16 +1,19 @@
 <script setup>
-import { computed, ref, watchEffect } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { pages } from '../store/pages';
 import Page from './helper/Page.vue';
 import { sendJoinEvent, sendLeaveEvent, removeEvent, events, findEventAttendees, toggleSavedEvent } from '../store/events';
 import { auth } from '../store/auth';
 import { userLocation } from '../store/userLocation';
+import { addEventComment, deleteEventComment, getEventComments, getEventExportUrl } from '../api';
 import heartBackground from '../assets/heart-background-full.png';
 import Avatar from './helper/Avatar.vue';
 import { formatDistanceLabel, formatEventDate } from '../utils/eventMeta';
 
 const msg = ref('');
 const showJoin = ref(true);
+const comments = ref([]);
+const commentBody = ref('');
 const isSaved = computed(() => events.isEventSaved(events.selected.id));
 const isOwner = computed(() => events.selected.userId === auth.user.userId);
 const distanceLabel = computed(() => formatDistanceLabel(userLocation.location, events.selected));
@@ -37,7 +40,7 @@ const onDelete = async () => {
 function backtoMap() {
   msg.value = '';
   events.clearSelectedEvent();
-  pages.dropLayer();
+  pages.dropLayer('event-overview');
 }
 
 async function saveEvent() {
@@ -47,19 +50,54 @@ async function saveEvent() {
 
 async function copyEventLink() {
   const url = new URL(window.location.href);
-  url.searchParams.set('tab', pages.selected);
+  url.pathname = '/events';
   url.searchParams.set('event', events.selected.id);
   await navigator.clipboard.writeText(url.toString());
   msg.value = 'Link copied';
 }
 
-watchEffect(() => {
+async function loadComments() {
+  if (!events.selected.id) {
+    comments.value = [];
+    return;
+  }
+  const response = await getEventComments(events.selected.id);
+  comments.value = response.comments || [];
+}
+
+async function postComment() {
+  if (!commentBody.value.trim()) {
+    return;
+  }
+  const response = await addEventComment(events.selected.id, auth.user.userId, commentBody.value.trim());
+  if (response.result) {
+    commentBody.value = '';
+    await loadComments();
+  }
+}
+
+async function removeComment(commentId) {
+  const response = await deleteEventComment(events.selected.id, commentId, auth.user.userId);
+  if (response.result) {
+    await loadComments();
+  }
+}
+
+const eventExportUrl = computed(() => (
+  events.selected.id ? getEventExportUrl(events.selected.id) : '#'
+));
+
+watch(() => events.selected.id, loadComments, { immediate: true });
+
+watch(() => events.selected.attendees, () => {
   if (!events.selected.attendees) {
     return;
   }
 
   showJoin.value = !events.selected.attendees.some(attendee => attendee.userId === auth.user.userId);
-});
+}, { immediate: true });
+
+onMounted(loadComments);
 </script>
 
 <template>
@@ -102,7 +140,7 @@ watchEffect(() => {
             <Avatar :username="events.selected.username" custom-class="pfp"/>
             <div class="text">
               <div class="username">{{ events.selected.username }}</div>
-              <div class="id">#{{ auth.user.userId.substring(0, 6) }}</div>
+              <div class="id">#{{ events.selected.userId?.substring(0, 6) }}</div>
             </div>
           </div>
         </section>
@@ -120,6 +158,34 @@ watchEffect(() => {
           </div>
           <p v-else class="section-copy">No attendees yet.</p>
         </section>
+
+        <section>
+          <div class="comments-head">
+            <p class="sub-title">Comments</p>
+            <span class="meta-chip">{{ comments.length }} total</span>
+          </div>
+          <div class="comment-compose">
+            <textarea v-model="commentBody" class="textarea" rows="3" placeholder="Add a comment for this event"></textarea>
+            <button type="button" class="btn btn-primary" @click="postComment">Post comment</button>
+          </div>
+          <div v-if="comments.length" class="comments-list">
+            <article v-for="comment in comments" :key="comment.id" class="comment-card">
+              <div class="comment-head">
+                <strong>{{ comment.username }}</strong>
+                <button
+                  v-if="comment.userId === auth.user.userId || isOwner"
+                  type="button"
+                  class="btn btn-ghost comment-delete"
+                  @click="removeComment(comment.id)"
+                >
+                  Remove
+                </button>
+              </div>
+              <p>{{ comment.body }}</p>
+            </article>
+          </div>
+          <p v-else class="section-copy">No comments yet.</p>
+        </section>
       </div>
     </article>
 
@@ -129,6 +195,7 @@ watchEffect(() => {
       <button v-else class="btn btn-secondary overview-btn" @click="leave">Leave Event</button>
       <button class="btn btn-secondary overview-btn" @click="saveEvent">{{ isSaved ? 'Saved' : 'Interested' }}</button>
       <button class="btn btn-secondary overview-btn" @click="copyEventLink">Copy Link</button>
+      <a class="btn btn-secondary overview-btn" :href="eventExportUrl">Export .ics</a>
       <button class="btn btn-secondary overview-btn" @click="backtoMap">Back To Map</button>
     </div>
 
@@ -270,6 +337,37 @@ watchEffect(() => {
 
 .error-msg {
   color: var(--danger);
+}
+
+.comments-head,
+.comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.comment-compose,
+.comments-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.comment-card {
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+}
+
+.comment-card p {
+  margin: 0.45rem 0 0;
+  color: var(--ink-soft);
+}
+
+.comment-delete {
+  min-height: auto;
+  padding: 0;
 }
 
 @media (max-width: 640px) {

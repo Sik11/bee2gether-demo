@@ -12,19 +12,24 @@ const props = defineProps({
 
 </script>
 <template>
-  <div>
-    <svg 
-      :width="width" 
-      :height="height" 
-      :style="style" 
-      :id="id" :class="customClass"
-      viewBox="0 0 25 25"
-      preserveAspectRatio="xMidYMid meet"
-      fill="currentColor"
-    >
-      <path :d="path" />
-    </svg>
-  </div>
+  <svg
+    :width="width"
+    :height="height"
+    :style="style"
+    :id="id"
+    :class="['svg-icon', customClass]"
+    viewBox="0 0 25 25"
+    preserveAspectRatio="xMidYMid meet"
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <path :d="path" />
+  </svg>
 </template>
+
 <style scoped>
+.svg-icon {
+  display: block;
+  flex: 0 0 auto;
+}
 </style>

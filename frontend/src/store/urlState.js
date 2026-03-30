@@ -1,34 +1,25 @@
-function hasWindow() {
-  return typeof window !== "undefined";
-}
-
 export function readQueryState() {
-  if (!hasWindow()) {
-    return { tab: null, event: null, group: null };
-  }
-
-  const params = new URLSearchParams(window.location.search);
+  const route = globalThis?.__beeRouter?.currentRoute?.value;
+  const params = route?.query ?? {};
   return {
-    tab: params.get("tab"),
-    event: params.get("event"),
-    group: params.get("group"),
+    tab: params.tab ?? null,
+    event: params.event ?? null,
+    group: params.group ?? null,
+    notifications: params.notifications ?? null,
   };
 }
 
 export function updateQueryState(patch) {
-  if (!hasWindow()) {
-    return;
-  }
-
-  const url = new URL(window.location.href);
+  const router = globalThis?.__beeRouter;
+  const route = router?.currentRoute?.value;
+  if (!router || !route) return;
+  const query = { ...route.query };
   for (const [key, value] of Object.entries(patch)) {
     if (value === null || value === undefined || value === "") {
-      url.searchParams.delete(key);
+      delete query[key];
     } else {
-      url.searchParams.set(key, String(value));
+      query[key] = String(value);
     }
   }
-
-  const next = `${url.pathname}${url.search}${url.hash}`;
-  window.history.replaceState({}, "", next);
+  router.replace({ query });
 }

@@ -1,11 +1,12 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { pages } from '../store/pages';
 import { groups, joinUserGroup } from "../store/groups.js";
 import Page from './helper/Page.vue';
 import { events } from '../store/events.js';
 import heartBackground from '../assets/heart-background.png';
 import { auth } from '../store/auth';
+import { getGroupChatMessages, sendGroupChatMessage } from '../api';
 import { formatEventDate } from '../utils/eventMeta';
 
 const emit = defineEmits(['backToMap']);
@@ -22,7 +23,7 @@ async function joinGroup() {
 
 function backtoMap() {
   groups.clearSelectedGroup();
-  pages.dropLayer();
+  pages.dropLayer('group-overview');
   emit("backToMap");
 }
 
@@ -33,11 +34,46 @@ function clickedEvent(event) {
 const groupEvents = computed(() => groups.currentGroup.events);
 const currentTitle = computed(() => groups.currentGroup.name);
 const isOwner = computed(() => groups.currentGroup.userId === auth.user.userId);
+const chatMessages = ref([]);
+const chatBody = ref('');
+let chatInterval = null;
 
 function createGroupEvent() {
   groups.currentGroupIdForEvents = groups.currentGroup.id;
   pages.addLayer('create-event');
 }
+
+async function refreshChat() {
+  if (!groups.currentGroup.id || !auth.user?.userId || !isGroupJoined.value) {
+    chatMessages.value = [];
+    return;
+  }
+  const response = await getGroupChatMessages(groups.currentGroup.id, auth.user.userId);
+  if (response.result) {
+    chatMessages.value = response.messages || [];
+  }
+}
+
+async function sendMessage() {
+  if (!chatBody.value.trim()) {
+    return;
+  }
+  const response = await sendGroupChatMessage(groups.currentGroup.id, auth.user.userId, chatBody.value.trim());
+  if (response.result) {
+    chatBody.value = '';
+    await refreshChat();
+  }
+}
+
+watch(() => groups.currentGroup.id, refreshChat, { immediate: true });
+
+onMounted(() => {
+  chatInterval = window.setInterval(refreshChat, 5000);
+});
+
+onUnmounted(() => {
+  window.clearInterval(chatInterval);
+});
 </script>
 
 <template>
@@ -79,6 +115,30 @@ function createGroupEvent() {
         <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
       </article>
     </div>
+
+    <section v-if="isGroupJoined" class="chat-panel soft-panel">
+      <div class="chat-head">
+        <div>
+          <p class="eyebrow">Group chat</p>
+          <h3>Talk to the hive</h3>
+        </div>
+        <button type="button" class="btn btn-secondary" @click="refreshChat">Refresh chat</button>
+      </div>
+      <div v-if="chatMessages.length" class="chat-list">
+        <article v-for="message in chatMessages" :key="message.id" class="chat-message">
+          <div class="chat-meta">
+            <strong>{{ message.username }}</strong>
+            <span>{{ new Date(message.createdAt).toLocaleString() }}</span>
+          </div>
+          <p>{{ message.body }}</p>
+        </article>
+      </div>
+      <p v-else class="section-copy">No messages yet.</p>
+      <div class="chat-compose">
+        <textarea v-model="chatBody" class="textarea" rows="3" placeholder="Send a message to the group"></textarea>
+        <button type="button" class="btn btn-primary" @click="sendMessage">Send message</button>
+      </div>
+    </section>
   </Page>
 </template>
 
@@ -174,6 +234,51 @@ function createGroupEvent() {
 .empty-state {
   padding: 1.35rem;
   border-radius: var(--radius-lg);
+}
+
+.chat-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+}
+
+.chat-head,
+.chat-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.chat-head h3 {
+  margin: 0.35rem 0 0;
+  font-family: var(--font-display);
+}
+
+.chat-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.chat-message {
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+}
+
+.chat-message p {
+  margin: 0.45rem 0 0;
+}
+
+.chat-meta span {
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.chat-compose {
+  display: grid;
+  gap: 0.75rem;
 }
 
 @media (max-width: 720px) {

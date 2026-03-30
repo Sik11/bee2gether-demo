@@ -1,37 +1,80 @@
 <script setup>
 import { computed } from 'vue';
-import { mdiThemeLightDark, mdiPlus } from '@mdi/js';
+import { RouterView, useRoute, useRouter } from 'vue-router';
+import { mdiAccountCircle, mdiBellOutline, mdiCalendar, mdiMap, mdiPlus, mdiThemeLightDark, mdiAccountGroup } from '@mdi/js';
 import svgIcon from './svg-icon.vue';
 import { auth } from '../../store/auth';
-import { pages } from '../../store/pages';
+import { navItems, pages } from '../../store/pages';
+import { notifications } from '../../store/notifications';
 import { settings } from '../../store/settings';
+import { updateQueryState } from '../../store/urlState';
 import logo from '../../assets/logo.png';
 import darkLogo from '../../assets/dark-logo.png';
+import CreateEvent from '../CreateEvent.vue';
+import CreateGroup from '../CreateGroup.vue';
+import GroupOverview from '../GroupOverview.vue';
+import EventOverview from '../EventOverview.vue';
+import NotificationsPanel from '../NotificationsPanel.vue';
 
-const navItems = computed(() => pages.getLabelledTabs());
+const route = useRoute();
+const router = useRouter();
+
+const iconMap = {
+  map: mdiMap,
+  calendar: mdiCalendar,
+  groups: mdiAccountGroup,
+  account: mdiAccountCircle,
+};
+
 const topbarCreateHiddenPages = ["map", "events", "account"];
-const showTopbarCreateAction = computed(() => !topbarCreateHiddenPages.includes(pages.selected));
+const showTopbarCreateAction = computed(() => !topbarCreateHiddenPages.includes(String(route.name)));
+const notificationsOpen = computed(() => route.query.notifications === '1');
+
+const overlayComponents = {
+  'create-event': CreateEvent,
+  'create-group': CreateGroup,
+  'group-overview': GroupOverview,
+  'event-overview': EventOverview,
+};
 
 const toggleTheme = () => {
   settings.isDarkMode = !settings.isDarkMode;
 };
 
 const select = (id) => {
-  pages.setSelected(id);
+  const item = navItems.find((entry) => entry.id === id);
+  if (!item) {
+    return;
+  }
+  pages.clearLayers();
+  router.push(item.to);
 };
+
+function toggleNotifications() {
+  updateQueryState({ notifications: notificationsOpen.value ? null : 1 });
+}
 </script>
 
 <template>
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-block">
-        <img :src="settings.isDarkMode ? darkLogo : logo" alt="Logo saying Bee 2 Gether with a happy bee ontop"/>
+        <img :src="settings.isDarkMode ? darkLogo : logo" alt="Bee2Gether logo" />
         <div>
           <p class="brand-kicker">Bee2Gether</p>
           <h1>Hello, {{ auth.user.username }}</h1>
         </div>
       </div>
       <div class="topbar-actions">
+        <button
+          type="button"
+          class="theme-btn"
+          aria-label="Open notifications"
+          @click="toggleNotifications"
+        >
+          <svg-icon :path="mdiBellOutline" height="1.15rem"/>
+          <span v-if="notifications.unreadCount" class="notification-badge">{{ notifications.unreadCount }}</span>
+        </button>
         <button
           v-if="showTopbarCreateAction"
           type="button"
@@ -52,47 +95,43 @@ const select = (id) => {
         <div class="sidebar-spacer" aria-hidden="true"></div>
         <nav class="sidebar-nav">
           <button
-            v-for="({ id, label }) in navItems"
-            :key="id"
+            v-for="item in navItems"
+            :key="item.id"
             type="button"
-            :class="['nav-item', { active: pages.isSelected(id) }]"
-            @click="select(id)"
+            :class="['nav-item', { active: route.name === item.id }]"
+            @click="select(item.id)"
           >
-            <svg-icon :path="label.icon" height="1.15rem"/>
-            <span>{{ label.text }}</span>
+            <svg-icon :path="iconMap[item.iconKey]" height="1.15rem"/>
+            <span>{{ item.text }}</span>
           </button>
         </nav>
       </aside>
 
       <main class="workspace">
-        <div class="page-stack">
-          <template v-for="({ component, id, props, label }) in pages.tabs" :key="id">
-            <div
-              v-if="pages.isVisible(id)"
-              :class="['page', {
-                visible: pages.isVisible(id),
-                overlay: !label,
-                stacked: pages.layers.includes(id)
-              }]"
-              :style="{ zIndex: pages.getZIndex(id) }"
-            >
-              <component :is="component" v-bind="props"/>
-            </div>
-          </template>
-        </div>
+        <RouterView />
       </main>
+    </div>
+
+    <div class="overlay-stack">
+      <component
+        :is="overlayComponents[layer]"
+        v-for="layer in pages.layers"
+        :key="layer"
+        class="overlay-card"
+      />
+      <NotificationsPanel v-if="notificationsOpen" />
     </div>
 
     <nav class="bottom-nav soft-panel">
       <button
-        v-for="({ id, label }) in navItems"
-        :key="id"
+        v-for="item in navItems"
+        :key="item.id"
         type="button"
-        :class="['bottom-nav__item', { active: pages.isSelected(id) }]"
-        @click="select(id)"
+        :class="['bottom-nav__item', { active: route.name === item.id }]"
+        @click="select(item.id)"
       >
-        <svg-icon :path="label.icon" height="1.25rem"/>
-        <span>{{ label.text }}</span>
+        <svg-icon :path="iconMap[item.iconKey]" height="1.25rem"/>
+        <span>{{ item.text }}</span>
       </button>
     </nav>
   </div>
@@ -100,13 +139,14 @@ const select = (id) => {
 
 <style scoped lang="scss">
 .app-shell {
-  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding-bottom: calc(var(--bottom-nav-height) + 1rem);
+  padding-bottom: 0;
   background: var(--canvas);
   color: var(--ink);
   transition: background-color var(--transition-base), color var(--transition-base);
+  overflow: hidden;
 }
 
 .topbar {
@@ -179,9 +219,11 @@ const select = (id) => {
   border: 1px solid var(--border);
   color: var(--ink);
   box-shadow: var(--shadow-sm);
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  position: relative;
   transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 
@@ -192,11 +234,16 @@ const select = (id) => {
 }
 
 .shell-body {
+  --shell-panel-height: calc(100dvh - var(--topbar-height));
   flex: 1;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   gap: 1rem;
-  padding: 0 1rem 1rem;
+  padding: 0 1rem 0;
+  align-items: start;
+  min-height: calc(100dvh - var(--topbar-height));
+  max-height: calc(100dvh - var(--topbar-height));
+  overflow: hidden;
 }
 
 .sidebar {
@@ -206,6 +253,17 @@ const select = (id) => {
   padding: 1rem;
   border-radius: var(--radius-lg);
   background: var(--chrome-surface);
+  position: sticky;
+  top: calc(var(--topbar-height) + 0.5rem);
+  height: var(--shell-panel-height);
+  min-height: var(--shell-panel-height);
+  max-height: var(--shell-panel-height);
+  overflow: auto;
+  align-self: start;
+  margin-bottom: 1rem;
+  height: calc(var(--shell-panel-height) - 1rem);
+  min-height: calc(var(--shell-panel-height) - 1rem);
+  max-height: calc(var(--shell-panel-height) - 1rem);
 }
 
 .sidebar-spacer {
@@ -248,134 +306,118 @@ const select = (id) => {
 
 .workspace {
   min-width: 0;
-  background: var(--canvas);
-  transition: background-color var(--transition-base);
-}
-
-.page-stack {
-  position: relative;
-  min-height: calc(100dvh - var(--topbar-height) - 1.5rem);
-}
-
-.page {
-  position: absolute;
-  inset: 0;
+  height: calc(var(--shell-panel-height) - 1rem);
+  max-height: calc(var(--shell-panel-height) - 1rem);
+  overflow: auto;
+  overscroll-behavior: contain;
   background: transparent;
-  opacity: 0;
-  transform: translateY(0.75rem);
+  transition: background-color var(--transition-base);
+  margin-bottom: 1rem;
+}
+
+.notification-badge {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  width: 0.52rem;
+  height: 0.52rem;
+  border-radius: 999px;
+  background: #5da7ff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #5da7ff 18%, transparent);
+}
+
+.overlay-stack {
+  position: fixed;
+  inset: var(--topbar-height) 0 calc(var(--bottom-nav-height) + 0.5rem) 0;
+  z-index: 70;
   pointer-events: none;
-  transition: opacity var(--transition-base), transform var(--transition-base);
+}
 
-  &.visible {
-    opacity: 1;
-    transform: translateY(0);
-    pointer-events: auto;
-  }
-
-  &.overlay {
-    inset: 1rem clamp(0.25rem, 2vw, 1.25rem) 1rem;
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow-lg);
-    overflow: auto;
-  }
+.overlay-card {
+  pointer-events: auto;
 }
 
 .bottom-nav {
   position: fixed;
-  left: 1rem;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 45;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: min(calc(100% - 1.5rem), 28rem);
   display: none;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.25rem;
-  padding: 0.45rem;
-  border-radius: var(--radius-lg);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0.55rem;
+  border-radius: calc(var(--radius-lg) + 0.2rem);
 }
 
 .bottom-nav__item {
-  min-height: 4.25rem;
-  padding: 0.6rem 0.45rem;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--ink-muted);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  justify-items: center;
   gap: 0.35rem;
-  font-size: 0.72rem;
-  font-weight: 700;
+  padding: 0.55rem 0.2rem;
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  background: transparent;
   transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 
-  &:hover {
+  span {
+    font-size: 0.73rem;
+    font-weight: 700;
+  }
+
+  &:hover,
+  &.active {
     background: var(--chrome-hover);
     color: var(--ink);
-  }
-
-  &.active {
-    background: var(--accent-soft);
-    color: var(--ink);
+    transform: translateY(-1px);
   }
 }
 
-.bottom-nav__item :deep(svg) {
-  color: var(--nav-icon);
-}
-
-.bottom-nav__item:hover :deep(svg),
-.bottom-nav__item.active :deep(svg) {
-  color: var(--nav-icon-active);
-}
-
-@media (max-width: 1024px) {
+@media (max-width: 960px) {
   .shell-body {
     grid-template-columns: 1fr;
+    max-height: calc(100dvh - var(--topbar-height) - var(--bottom-nav-height) - 1rem);
+    min-height: calc(100dvh - var(--topbar-height) - var(--bottom-nav-height) - 1rem);
+    padding-bottom: 1rem;
   }
 
   .sidebar {
     display: none;
   }
 
-  .topbar {
-    padding-bottom: 0.75rem;
-  }
-
-  .action-btn span {
-    display: none;
-  }
-
-  .action-btn {
-    width: 2.9rem;
-    padding-inline: 0;
-  }
-
-  .page-stack {
-    min-height: calc(100dvh - var(--topbar-height) - var(--bottom-nav-height) - 1.5rem);
-  }
-
-  .page.overlay {
-    inset: 0;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  .workspace {
+    height: auto;
+    max-height: calc(100dvh - var(--topbar-height) - var(--bottom-nav-height) - 1rem);
   }
 
   .bottom-nav {
     display: grid;
   }
+
+  .app-shell {
+    padding-bottom: calc(var(--bottom-nav-height) + 1rem);
+  }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
+  .brand-block img {
+    width: 2.4rem;
+    height: 2.4rem;
+  }
+
   .topbar {
-    padding-inline: 0.85rem;
+    padding-inline: 0.75rem;
+  }
+
+  .brand-kicker {
+    font-size: 0.72rem;
   }
 
   .brand-block h1 {
     font-size: 1rem;
   }
 
-  .brand-kicker {
+  .action-btn span {
     display: none;
   }
 }

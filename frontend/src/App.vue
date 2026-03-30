@@ -1,24 +1,17 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, watch } from 'vue';
-import { mdiMap, mdiCalendar, mdiAccountCircle, mdiAccountGroup } from '@mdi/js';
-import Wrapper from "./components/helper/Wrapper.vue";
+import { onMounted, onUnmounted, watch } from 'vue';
+import { RouterView, useRoute, useRouter } from 'vue-router';
 import { auth } from './store/auth';
-import { pages } from './store/pages';
 import { settings } from './store/settings';
 import { startTrackingLocation } from './store/userLocation';
-import { startPollingEvents, startPollingEventAttendees, events, updateSavedEvents } from './store/events';
-import { groups, startPollingAllGroups, startPollingUserGroups } from './store/groups';
-import { readQueryState } from './store/urlState';
+import { startPollingEvents, startPollingEventAttendees, updateSavedEvents, events } from './store/events';
+import { groups, startPollingAllGroups, startPollingUserGroups, updateGroups, updateUserGroups } from './store/groups';
+import { refreshNotifications } from './store/notifications';
+import { pages } from './store/pages';
 
-const Auth = defineAsyncComponent(() => import('./components/Auth.vue'));
-const Map = defineAsyncComponent(() => import('./components/Map.vue'));
-const CreateEvent = defineAsyncComponent(() => import('./components/CreateEvent.vue'));
-const YourEvents = defineAsyncComponent(() => import('./components/YourEvents.vue'));
-const YourGroups = defineAsyncComponent(() => import('./components/YourGroups.vue'));
-const CreateGroups = defineAsyncComponent(() => import('./components/CreateGroup.vue'));
-const GroupOverview = defineAsyncComponent(() => import('./components/GroupOverview.vue'));
-const Account = defineAsyncComponent(() => import('./components/Account.vue'));
-const EventOverview = defineAsyncComponent(() => import('./components/EventOverview.vue'));
+const route = useRoute();
+const router = useRouter();
+let notificationIntervalId = null;
 
 startTrackingLocation();
 startPollingEvents();
@@ -26,58 +19,95 @@ startPollingAllGroups();
 startPollingUserGroups();
 startPollingEventAttendees();
 
-pages.init([
-  { component: Map, id: "map", label: { text: "Map", icon: mdiMap }, props: { unsued: 'this feature does exist' } },
-  { component: YourEvents, id: "events", label: { text: "Your Events", icon: mdiCalendar } },
-  { component: YourGroups, id: "groups", label: { text: "Groups", icon: mdiAccountGroup } },
-  { component: Account, id: "account", label: { text: "Account", icon: mdiAccountCircle } },
-  { component: CreateEvent, id: "create-event" },
-  { component: CreateGroups, id: "create-group" },
-  { component: GroupOverview, id: "group-overview" },
-  { component: EventOverview, id: "event-overview" }
-], 'map');
-
-const initialBootResolved = computed(() => auth.isLoggedIn && Boolean(auth.user?.userId));
-
-async function restoreDeepLinkState() {
-  if (!initialBootResolved.value) {
+async function restoreOverlayState() {
+  if (!auth.isLoggedIn || !auth.user?.userId) {
     return;
   }
 
-  const query = readQueryState();
-  if (query.event) {
-    await events.selectEventById(query.event, { openLayer: true, syncUrl: false });
-    return;
+  const eventId = route.query.event;
+  const groupId = route.query.group;
+
+  if (groupId) {
+    await groups.selectGroupById(groupId, { openLayer: true, syncUrl: false });
+  } else {
+    groups.clearSelectedGroup({ syncUrl: false });
+    pages.dropLayer('group-overview');
   }
-  if (query.group) {
-    await groups.selectGroupById(query.group, { openLayer: true, syncUrl: false });
+
+  if (eventId) {
+    await events.selectEventById(eventId, { openLayer: true, syncUrl: false });
+  } else {
+    events.clearSelectedEvent({ syncUrl: false });
+    pages.dropLayer('event-overview');
   }
 }
+
+watch(
+  () => route.name,
+  (name) => {
+    if (typeof name === 'string' && name !== 'auth') {
+      pages.syncSelected(name);
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => route.query,
+  async () => {
+    await restoreOverlayState();
+  },
+  { deep: true }
+);
 
 watch(
   () => auth.user?.userId,
   async (userId) => {
     if (!auth.isLoggedIn || !userId) {
+      router.replace({ name: 'auth' });
       return;
     }
-    await updateSavedEvents(userId);
-    await restoreDeepLinkState();
+    await Promise.all([
+      updateSavedEvents(userId),
+      updateUserGroups(userId),
+      updateGroups(),
+      refreshNotifications(),
+    ]);
+    if (route.name === 'auth') {
+      router.replace({ name: 'map' });
+    }
+    await restoreOverlayState();
   },
   { immediate: true }
 );
 
 onMounted(async () => {
   if (auth.isLoggedIn && auth.user?.userId) {
-    await updateSavedEvents(auth.user.userId);
-    await restoreDeepLinkState();
+    await Promise.all([
+      updateSavedEvents(auth.user.userId),
+      updateUserGroups(auth.user.userId),
+      updateGroups(),
+      refreshNotifications(),
+    ]);
+    await restoreOverlayState();
+  }
+  notificationIntervalId = window.setInterval(() => {
+    if (auth.isLoggedIn && auth.user?.userId) {
+      refreshNotifications();
+    }
+  }, 10000);
+});
+
+onUnmounted(() => {
+  if (notificationIntervalId) {
+    window.clearInterval(notificationIntervalId);
   }
 });
 </script>
 
 <template>
   <div :class="['viewport', { 'dark-mode': settings.isDarkMode }]">
-    <Auth v-if="!auth.isLoggedIn" />
-    <Wrapper v-else />
+    <RouterView />
   </div>
 </template>
 
@@ -93,20 +123,18 @@ onMounted(async () => {
 html,
 body,
 #app {
-  min-height: 100%;
+  height: 100%;
   margin: 0;
 }
 
 body {
-  background:
-    radial-gradient(circle at top left, rgba(244, 178, 35, 0.1), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(44, 122, 123, 0.08), transparent 30%),
-    var(--canvas);
+  background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color var(--transition-base), color var(--transition-base);
+  overflow: hidden;
 }
 
 a,
@@ -132,17 +160,18 @@ img {
 
 .viewport {
   width: 100%;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 #app {
   position: relative;
+  overflow: hidden;
 }
 
 .soft-panel {
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-md);
   backdrop-filter: blur(12px);
 }
 
@@ -258,17 +287,5 @@ img {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.section-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-}
-
-.section-copy {
-  color: var(--ink-soft);
-  line-height: 1.6;
 }
 </style>

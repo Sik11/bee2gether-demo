@@ -1,10 +1,20 @@
 import { reactive } from "vue";
-import { markRaw } from 'vue';
-import { readQueryState, updateQueryState } from "./urlState";
 
-const STORAGE_KEY = "bee2gether.pages";
+const STORAGE_KEY = "bee2gether.route";
 
-function loadStoredSelection() {
+function persistRouteSelection(routeName) {
+  if (typeof window === "undefined" || !routeName) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, routeName);
+  } catch (error) {
+    console.warn("Failed to persist selected route", error);
+  }
+}
+
+function loadRouteSelection() {
   if (typeof window === "undefined") {
     return null;
   }
@@ -12,90 +22,46 @@ function loadStoredSelection() {
   try {
     return window.localStorage.getItem(STORAGE_KEY);
   } catch (error) {
-    console.warn("Failed to restore selected page", error);
+    console.warn("Failed to restore selected route", error);
     return null;
   }
 }
 
-function persistSelection(id) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(STORAGE_KEY, id);
-  } catch (error) {
-    console.warn("Failed to persist selected page", error);
-  }
-}
+export const navItems = [
+  { id: "map", text: "Map", iconKey: "map", to: "/map" },
+  { id: "events", text: "Your Events", iconKey: "calendar", to: "/events" },
+  { id: "groups", text: "Groups", iconKey: "groups", to: "/groups" },
+  { id: "account", text: "Account", iconKey: "account", to: "/account" },
+];
 
 export const pages = reactive({
-  selected: undefined,
+  selected: loadRouteSelection() || "map",
   layers: [],
-  tabs: [],
-  lastAction: 'setSelected',
 
-  /**
-   * Initialise the wrapper pages
-   * @param {{}} tabs 
-   * @param {string} id 
-   */
-  init(tabs, id) {
-    tabs.forEach(({component}) => markRaw(component))
-    pages.tabs = tabs
-    const restored = loadStoredSelection();
-    const queryTab = readQueryState().tab;
-    const tabIds = tabs.filter((tab) => tab.label !== undefined).map((tab) => tab.id);
-    const preferredTab = tabIds.includes(queryTab) ? queryTab : restored;
-    const hasRestoredTab = tabIds.includes(preferredTab);
-    pages.selected = hasRestoredTab ? preferredTab : id
-    updateQueryState({ tab: pages.selected })
+  syncSelected(id) {
+    pages.selected = id;
+    persistRouteSelection(id);
   },
 
-  /**
-   * Set the selected page & clears all layered pages
-   * @param {string} id 
-   */
-  setSelected(id, options = {}) {
-    const { syncUrl = true } = options;
-    pages.selected = id
-    pages.layers = []
-    pages.lastAction = 'setSelected'
-    persistSelection(id)
-    if (syncUrl) {
-      updateQueryState({ tab: id, event: null, group: null })
-    }
-  },
-  /**
-   * 
-   * @param {*} id 
-   */
   addLayer(id) {
     if (!pages.layers.includes(id)) {
-      pages.layers.push(id)
-      pages.lastAction = 'addLayer'
+      pages.layers.push(id);
     }
   },
-  dropLayer() {
-    pages.layers.pop()
-    pages.lastAction = 'dropLayer'
+
+  dropLayer(id) {
+    if (!id) {
+      pages.layers.pop();
+      return;
+    }
+    pages.layers = pages.layers.filter((layerId) => layerId !== id);
   },
 
-  // These are used by Wrapper.vue
-  getLabelledTabs() {
-    return pages.tabs.filter(({label}) => label !== undefined)
+  clearLayers() {
+    pages.layers = [];
   },
-  getZIndex(id) {
-    const zindex =  [pages.selected, ...pages.layers].indexOf(id) + 1
-    return zindex === 0 ? 10 : zindex
+
+  isLayerVisible(id) {
+    return pages.layers.includes(id);
   },
-  isSelected(id) {
-    return id === pages.selected
-  },
-  isVisible(id) {
-    return id === pages.selected || pages.layers.includes(id)
-  },
-  isLayerEmpty() {
-    return pages.layers.length === 0 
-  }
-})
+});

@@ -120,6 +120,15 @@ export const createEvent = async (eventData) =>
 export const getEvent = async (eventId) => 
   createRequestFunction('getEventInfo', 'POST', {eventId})()
 
+export const getEventComments = async (eventId) =>
+  createRequestFunction('getEventComments', 'POST', { eventId })()
+
+export const addEventComment = async (eventId, userId, body) =>
+  createRequestFunction('addEventComment', 'POST', { eventId, userId, body })()
+
+export const deleteEventComment = async (eventId, commentId, userId) =>
+  createRequestFunction('deleteEventComment', 'DELETE', { eventId, commentId, userId })()
+
 
 /**
  * Get map events
@@ -172,6 +181,12 @@ export const getGroupsAPI = async (userId) =>
 export const getGroupEvents = async (groupId) => 
   createRequestFunction('getGroupEvents', 'POST', {groupId})()
 
+export const getGroupChatMessages = async (groupId, userId) =>
+  createRequestFunction('getGroupChatMessages', 'POST', { groupId, userId })()
+
+export const sendGroupChatMessage = async (groupId, userId, body) =>
+  createRequestFunction('sendGroupChatMessage', 'POST', { groupId, userId, body })()
+
 export const saveEvent = async (userId, eventId) =>
   createRequestFunction('saveEvent', 'POST', { userId, eventId })()
 
@@ -180,6 +195,16 @@ export const removeSavedEvent = async (userId, eventId) =>
 
 export const getSavedEvents = async (userId) =>
   createRequestFunction('getSavedEvents', 'POST', { userId })()
+
+export const getNotifications = async (userId) =>
+  createRequestFunction('getNotifications', 'POST', { userId })()
+
+export const markNotificationsRead = async (userId, notificationIds = [], markAll = false) =>
+  createRequestFunction('markNotificationsRead', 'POST', { userId, notificationIds, markAll })()
+
+export const getEventExportUrl = (eventId) => getUrl(`exportEventIcs?eventId=${encodeURIComponent(eventId)}`);
+
+export const getScheduleExportUrl = (userId) => getUrl(`exportScheduleIcs?userId=${encodeURIComponent(userId)}`);
 
 /**
  * get all the groups events for a user

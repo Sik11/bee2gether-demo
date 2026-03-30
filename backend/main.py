@@ -12,7 +12,7 @@ from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 import bcrypt
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 import requests
@@ -62,6 +62,57 @@ def _event_response(event: dict[str, Any]) -> dict[str, Any]:
 
 def _group_response(group: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(group)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _append_notification(
+    user_id: str,
+    *,
+    notification_type: str,
+    title: str,
+    body: str,
+    actor_id: str | None = None,
+    actor_username: str | None = None,
+    event_id: str | None = None,
+    group_id: str | None = None,
+) -> None:
+    user = repository.get_user_by_id(user_id)
+    if user is None:
+        return
+
+    user.setdefault("notifications", [])
+    user["notifications"].insert(
+        0,
+        {
+            "id": str(uuid4()),
+            "type": notification_type,
+            "title": title,
+            "body": body,
+            "read": False,
+            "createdAt": _now_iso(),
+            "actorId": actor_id,
+            "actorUsername": actor_username,
+            "eventId": event_id,
+            "groupId": group_id,
+        },
+    )
+    user["notifications"] = user["notifications"][:75]
+    repository.update_user(user)
+
+
+def _comment_response(comment: dict[str, Any]) -> dict[str, Any]:
+    return deepcopy(comment)
+
+
+def _message_response(message: dict[str, Any]) -> dict[str, Any]:
+    return deepcopy(message)
+
+
+def _notification_response(notification: dict[str, Any]) -> dict[str, Any]:
+    return deepcopy(notification)
 
 
 def _lookup_user(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -203,6 +254,10 @@ def _delete_event_and_references(event: dict[str, Any]) -> None:
             user["eventsAttending"] = [item for item in user.get("eventsAttending", []) if item != event_id]
         if event_id in user.get("savedEvents", []):
             user["savedEvents"] = [item for item in user.get("savedEvents", []) if item != event_id]
+        if user.get("notifications"):
+            user["notifications"] = [
+                item for item in user["notifications"] if item.get("eventId") != event_id
+            ]
         repository.update_user(user)
 
     if event.get("groupId"):
@@ -234,6 +289,49 @@ def _coerce_float(value: Any, field_name: str) -> float:
 def _sanitize_filename(filename: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name)
     return safe.strip("-") or f"upload-{uuid4().hex}"
+
+
+def _ics_escape(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\n", "\\n")
+    )
+
+
+def _ics_datetime(value: Any) -> str:
+    event_at = _event_datetime(value) or datetime.now(timezone.utc)
+    return event_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _build_ics_calendar(events_to_export: list[dict[str, Any]]) -> str:
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Bee2Gether//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+
+    for event in events_to_export:
+        description = event.get("description") or ""
+        location = f"{event.get('lat', '')},{event.get('long', '')}"
+        lines.extend(
+            [
+                "BEGIN:VEVENT",
+                f"UID:{event['id']}@bee2gether",
+                f"DTSTAMP:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
+                f"DTSTART:{_ics_datetime(event.get('time'))}",
+                f"SUMMARY:{_ics_escape(event.get('name', 'Bee2Gether Event'))}",
+                f"DESCRIPTION:{_ics_escape(description)}",
+                f"LOCATION:{_ics_escape(location)}",
+                "END:VEVENT",
+            ]
+        )
+
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines)
 
 
 def _get_frontend_file(relative_path: str) -> Path | None:
@@ -326,6 +424,7 @@ async def create_user(request: Request) -> JSONResponse:
             "eventsAttending": [],
             "groupsMember": [],
             "savedEvents": [],
+            "notifications": [],
         }
     )
     return JSONResponse({"result": True, "msg": "OK", "userId": user_id})
@@ -387,6 +486,7 @@ async def create_group(request: Request) -> JSONResponse:
         "description": description,
         "userId": user_id,
         "events": [],
+        "messages": [],
     }
     repository.create_group(group)
 
@@ -422,13 +522,24 @@ async def join_group(request: Request) -> JSONResponse:
     user = repository.get_user_by_id(str(user_id))
     if user is None:
         return _json_error("User not found", 404)
-    _require_group(str(group_id))
+    group = _require_group(str(group_id))
 
     user.setdefault("groupsMember", [])
     if group_id in user["groupsMember"]:
         return _json_error("User already a member of the group", 400)
     user["groupsMember"].append(group_id)
     repository.update_user(user)
+    owner = repository.get_user_by_id(group["userId"])
+    if owner and owner["id"] != user["id"]:
+        _append_notification(
+            owner["id"],
+            notification_type="group-join",
+            title="New group member",
+            body=f"{user['username']} joined {group['name']}.",
+            actor_id=user["id"],
+            actor_username=user["username"],
+            group_id=str(group_id),
+        )
     return JSONResponse({"result": True, "msg": "Joined group successfully"})
 
 
@@ -482,6 +593,7 @@ async def create_event(request: Request) -> JSONResponse:
         "ongoing": payload.get("ongoing", True),
         "eventImg(s)": [],
         "attendees": [{"userId": user_id, "username": username}],
+        "comments": [],
     }
 
     group_id = payload.get("groupId")
@@ -576,6 +688,17 @@ async def add_attending_event(request: Request) -> JSONResponse:
         repository.update_event(event)
         if event.get("groupId"):
             _replace_group_event(event["groupId"], event)
+        if event.get("userId") and event["userId"] != user["id"]:
+            _append_notification(
+                event["userId"],
+                notification_type="event-join",
+                title="Someone joined your event",
+                body=f"{user['username']} joined {event['name']}.",
+                actor_id=user["id"],
+                actor_username=user["username"],
+                event_id=event_id,
+                group_id=event.get("groupId"),
+            )
 
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "eventId": event_id})
 
@@ -662,6 +785,42 @@ async def get_saved_events(request: Request) -> JSONResponse:
     )
 
 
+@api_router.api_route("/getNotifications", methods=["POST"])
+async def get_notifications(request: Request) -> JSONResponse:
+    payload = await request.json()
+    try:
+        user = _require_user(payload)
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    notifications = [_notification_response(item) for item in user.get("notifications", [])]
+    return JSONResponse(
+        {
+            "result": True,
+            "notifications": notifications,
+            "unreadCount": sum(1 for item in notifications if not item.get("read")),
+        }
+    )
+
+
+@api_router.api_route("/markNotificationsRead", methods=["POST"])
+async def mark_notifications_read(request: Request) -> JSONResponse:
+    payload = await request.json()
+    notification_ids = set(payload.get("notificationIds", []) or [])
+    mark_all = bool(payload.get("markAll"))
+    try:
+        user = _require_user(payload)
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    user.setdefault("notifications", [])
+    for notification in user["notifications"]:
+        if mark_all or notification.get("id") in notification_ids:
+            notification["read"] = True
+    repository.update_user(user)
+    return JSONResponse({"result": True, "msg": "Notifications updated"})
+
+
 @api_router.api_route("/saveEvent", methods=["POST"])
 async def save_event(request: Request) -> JSONResponse:
     payload = await request.json()
@@ -716,6 +875,84 @@ async def get_event_info(request: Request) -> JSONResponse:
     if event is None:
         return _json_error("Event not found", 400)
     return JSONResponse({"result": True, "eventInfo": _event_response(event), "event": _event_response(event)})
+
+
+@api_router.api_route("/getEventComments", methods=["POST"])
+async def get_event_comments(request: Request) -> JSONResponse:
+    payload = await request.json()
+    event_id = payload.get("eventId")
+    if not event_id:
+        return _json_error("Event ID is required", 400)
+    event = repository.get_event_by_id(str(event_id))
+    if event is None:
+        return _json_error("Event not found", 404)
+    comments = [_comment_response(item) for item in event.get("comments", [])]
+    return JSONResponse({"result": True, "comments": comments})
+
+
+@api_router.api_route("/addEventComment", methods=["POST"])
+async def add_event_comment(request: Request) -> JSONResponse:
+    payload = await request.json()
+    event_id = str(payload.get("eventId", "")).strip()
+    body = str(payload.get("body", "")).strip()
+    if not event_id or not body:
+        return _json_error("Event ID and comment body are required", 400)
+
+    try:
+        user = _require_user(payload)
+        event = _require_event(event_id)
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    comment = {
+        "id": str(uuid4()),
+        "userId": user["id"],
+        "username": user["username"],
+        "body": body,
+        "createdAt": _now_iso(),
+    }
+    event.setdefault("comments", []).append(comment)
+    repository.update_event(event)
+    if event.get("groupId"):
+        _replace_group_event(event["groupId"], event)
+    if event.get("userId") and event["userId"] != user["id"]:
+        _append_notification(
+            event["userId"],
+            notification_type="event-comment",
+            title="New comment on your event",
+            body=f"{user['username']}: {body[:72]}",
+            actor_id=user["id"],
+            actor_username=user["username"],
+            event_id=event_id,
+            group_id=event.get("groupId"),
+        )
+    return JSONResponse({"result": True, "comment": _comment_response(comment)})
+
+
+@api_router.api_route("/deleteEventComment", methods=["DELETE"])
+async def delete_event_comment(request: Request) -> JSONResponse:
+    payload = await request.json()
+    event_id = str(payload.get("eventId", "")).strip()
+    comment_id = str(payload.get("commentId", "")).strip()
+    if not event_id or not comment_id:
+        return _json_error("Event ID and comment ID are required", 400)
+    try:
+        user = _require_user(payload)
+        event = _require_event(event_id)
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    comment = next((item for item in event.get("comments", []) if item.get("id") == comment_id), None)
+    if comment is None:
+        return _json_error("Comment not found", 404)
+    if comment.get("userId") != user["id"] and event.get("userId") != user["id"]:
+        return _json_error("Not allowed to delete this comment", 403)
+
+    event["comments"] = [item for item in event.get("comments", []) if item.get("id") != comment_id]
+    repository.update_event(event)
+    if event.get("groupId"):
+        _replace_group_event(event["groupId"], event)
+    return JSONResponse({"result": True, "msg": "Comment deleted"})
 
 
 @api_router.api_route("/getEventImgs", methods=["POST"])
@@ -793,6 +1030,69 @@ async def get_all_user_group_events(request: Request) -> JSONResponse:
                 seen.add(event_id)
 
     return JSONResponse({"result": True, "msg": "Events retrieved successfully", "events": all_events})
+
+
+@api_router.api_route("/getGroupChatMessages", methods=["POST"])
+async def get_group_chat_messages(request: Request) -> JSONResponse:
+    payload = await request.json()
+    group_id = str(payload.get("groupId", "")).strip()
+    if not group_id:
+        return _json_error("GroupId is required", 400)
+    try:
+        user = _require_user(payload)
+        group = _require_group(group_id)
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    if group_id not in user.get("groupsMember", []) and group.get("userId") != user["id"]:
+        return _json_error("User is not a member of the group", 403)
+
+    messages = [_message_response(item) for item in group.get("messages", [])]
+    return JSONResponse({"result": True, "messages": messages})
+
+
+@api_router.api_route("/sendGroupChatMessage", methods=["POST"])
+async def send_group_chat_message(request: Request) -> JSONResponse:
+    payload = await request.json()
+    group_id = str(payload.get("groupId", "")).strip()
+    body = str(payload.get("body", "")).strip()
+    if not group_id or not body:
+        return _json_error("GroupId and body are required", 400)
+    try:
+        user = _require_user(payload)
+        group = _require_group(group_id)
+    except HTTPException as error:
+        return _json_error(str(error.detail), error.status_code)
+
+    if group_id not in user.get("groupsMember", []) and group.get("userId") != user["id"]:
+        return _json_error("User is not a member of the group", 403)
+
+    message = {
+        "id": str(uuid4()),
+        "userId": user["id"],
+        "username": user["username"],
+        "body": body,
+        "createdAt": _now_iso(),
+    }
+    group.setdefault("messages", []).append(message)
+    group["messages"] = group["messages"][-100:]
+    repository.update_group(group)
+
+    for recipient in repository.list_users():
+        if recipient["id"] == user["id"]:
+            continue
+        if group_id in recipient.get("groupsMember", []):
+            _append_notification(
+                recipient["id"],
+                notification_type="group-chat",
+                title=f"New message in {group['name']}",
+                body=f"{user['username']}: {body[:72]}",
+                actor_id=user["id"],
+                actor_username=user["username"],
+                group_id=group_id,
+            )
+
+    return JSONResponse({"result": True, "message": _message_response(message)})
 
 
 @api_router.api_route("/uploadEventImage", methods=["POST"])
@@ -911,8 +1211,52 @@ async def update_user(request: Request) -> JSONResponse:
     for field in ("eventsAttending", "groupsMember", "savedEvents"):
         if field in payload:
             user[field] = list(payload[field])
+    if "notifications" in payload:
+        user["notifications"] = list(payload["notifications"])
     repository.update_user(user)
     return JSONResponse({"result": True, "msg": "User updated successfully", "userId": user["id"]})
+
+
+@api_router.get("/exportEventIcs")
+async def export_event_ics(eventId: str) -> Response:
+    _cleanup_expired_events()
+    event = repository.get_event_by_id(str(eventId))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    calendar = _build_ics_calendar([event])
+    filename = f"{_sanitize_filename(event.get('name', 'event'))}.ics"
+    return Response(
+        content=calendar,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@api_router.get("/exportScheduleIcs")
+async def export_schedule_ics(userId: str) -> Response:
+    _cleanup_expired_events()
+    user = repository.get_user_by_id(str(userId))
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    exported_events = []
+    seen: set[str] = set()
+    for event_id in [*user.get("eventsAttending", []), *user.get("savedEvents", [])]:
+        if event_id in seen:
+            continue
+        event = repository.get_event_by_id(event_id)
+        if event is None or _event_status(event) == "ended":
+            continue
+        exported_events.append(event)
+        seen.add(event_id)
+
+    calendar = _build_ics_calendar(exported_events)
+    filename = f"{_sanitize_filename(user.get('username', 'schedule'))}-schedule.ics"
+    return Response(
+        content=calendar,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 app.include_router(api_router)

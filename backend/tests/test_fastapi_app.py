@@ -144,6 +144,77 @@ class FastApiCompatibilityTests(unittest.TestCase):
         self.assertIsNone(repository.get_event_by_id(expired_payload["eventId"]))
         self.assertIsNotNone(repository.get_event_by_id(fresh_payload["eventId"]))
 
+    def test_comments_notifications_chat_and_export_flow(self) -> None:
+        owner = self.client.put(
+            "/api/createUser",
+            json={"username": "owneruser", "password": "testpassword4"},
+        ).json()
+        member = self.client.put(
+            "/api/createUser",
+            json={"username": "memberuser", "password": "testpassword5"},
+        ).json()
+
+        group_payload = self.client.post(
+            "/api/createGroup",
+            json={"name": "Study Hive", "description": "Friends", "userId": owner["userId"]},
+        ).json()
+        group_id = group_payload["groupId"]
+
+        join_group = self.client.post(
+            "/api/joinGroup",
+            json={"userId": member["userId"], "groupId": group_id},
+        ).json()
+        self.assertTrue(join_group["result"])
+
+        event_payload = self.client.put(
+            "/api/createEvent",
+            json={
+                "name": "Revision Jam",
+                "time": "2026-04-05",
+                "long": -1.4,
+                "lat": 50.9,
+                "description": "Bring notes",
+                "tags": ["study"],
+                "userId": owner["userId"],
+                "groupId": group_id,
+            },
+        ).json()
+        event_id = event_payload["eventId"]
+
+        comment_payload = self.client.post(
+            "/api/addEventComment",
+            json={"eventId": event_id, "userId": member["userId"], "body": "I am in."},
+        ).json()
+        self.assertTrue(comment_payload["result"])
+
+        comments = self.client.post(
+            "/api/getEventComments",
+            json={"eventId": event_id},
+        ).json()
+        self.assertEqual(len(comments["comments"]), 1)
+
+        message_payload = self.client.post(
+            "/api/sendGroupChatMessage",
+            json={"groupId": group_id, "userId": member["userId"], "body": "See you there"},
+        ).json()
+        self.assertTrue(message_payload["result"])
+
+        messages = self.client.post(
+            "/api/getGroupChatMessages",
+            json={"groupId": group_id, "userId": owner["userId"]},
+        ).json()
+        self.assertEqual(len(messages["messages"]), 1)
+
+        notifications = self.client.post(
+            "/api/getNotifications",
+            json={"userId": owner["userId"]},
+        ).json()
+        self.assertGreaterEqual(notifications["unreadCount"], 2)
+
+        export_response = self.client.get("/api/exportEventIcs", params={"eventId": event_id})
+        self.assertEqual(export_response.status_code, 200)
+        self.assertIn("BEGIN:VCALENDAR", export_response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

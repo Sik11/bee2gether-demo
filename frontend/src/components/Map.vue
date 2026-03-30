@@ -728,8 +728,8 @@ watch(
 }
 
 .map-surface {
-  height: calc(100dvh - var(--topbar-height) - 2rem);
-  min-height: calc(100dvh - var(--topbar-height) - 2rem);
+  height: 100%;
+  min-height: 100%;
   width: 100%;
 }
 
