@@ -35,6 +35,7 @@ import SearchBar from './helper/Search-bar.vue';
 import { pages } from '../store/pages';
 import MapTools from './helper/Map-tools.vue';
 import { settings } from '../store/settings';
+import hiveMarkerAsset from '../assets/36611134_8_bee.svg';
 
 const emit = defineEmits(["eventClicked"]);
 const events = getEvents();
@@ -427,14 +428,30 @@ async function ensureHiveIcon() {
     return;
   }
 
-  const response = await fetch("/hive.png");
-  if (!response.ok) {
-    throw new Error(`Failed to load hive icon: ${response.status}`);
+  const size = 112;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Failed to create hive icon context");
   }
 
-  const bitmap = await createImageBitmap(await response.blob());
+  context.clearRect(0, 0, size, size);
+
+  const image = new Image();
+  image.decoding = "async";
+  image.src = hiveMarkerAsset;
+  await image.decode();
+  const drawWidth = 90;
+  const drawHeight = 104;
+  const drawX = (size - drawWidth) / 2;
+  const drawY = (size - drawHeight) / 2;
+  context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+
+  const bitmap = await createImageBitmap(canvas);
   if (!mapInstance.hasImage(eventIconId)) {
-    mapInstance.addImage(eventIconId, bitmap);
+    mapInstance.addImage(eventIconId, bitmap, { pixelRatio: 2 });
   }
 
   if (mapInstance.getSource(eventSourceId) && !mapInstance.getLayer(eventLayerId)) {
@@ -445,7 +462,15 @@ async function ensureHiveIcon() {
       filter: ["!", ["has", "point_count"]],
       layout: {
         "icon-image": eventIconId,
-        "icon-size": 0.92,
+        "icon-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          11, 0.6,
+          13, 0.68,
+          15, 0.78,
+          17, 0.88,
+        ],
         "icon-anchor": "bottom",
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,

@@ -1,13 +1,16 @@
 <script setup>
-import { nextTick, ref } from 'vue';
-import Page from './helper/Page.vue';
+import { computed, nextTick, ref } from 'vue';
+import { mdiCamera, mdiClose, mdiCrosshairsGps, mdiMagnify, mdiMapMarkerRadiusOutline, mdiRefresh } from '@mdi/js';
+import EventSheetMap from './helper/EventSheetMap.vue';
 import svgIcon from './helper/svg-icon.vue';
-import { mdiCamera, mdiMapMarker, mdiCrosshairsGps } from '@mdi/js';
-import { userLocation } from "../store/userLocation.js";
+import { userLocation } from '../store/userLocation.js';
 import { pages } from '../store/pages';
 import { auth } from '../store/auth';
-import { addEvent } from "../store/events.js";
-import { groups, updateCurrentGroup } from "../store/groups.js";
+import { addEvent } from '../store/events.js';
+import { groups, updateCurrentGroup } from '../store/groups.js';
+import { settings } from '../store/settings';
+import logo from '../assets/logo.png';
+import darkLogo from '../assets/dark-logo.png';
 
 const imagePreview = ref(null);
 const imageFileName = ref('');
@@ -25,11 +28,30 @@ const longitude = ref(null);
 const latitude = ref(null);
 const tagsLimit = ref(10);
 
-const title = 'Create Event';
+const activeLogo = computed(() => (settings.isDarkMode ? darkLogo : logo));
+const selectedPlaceTitle = computed(() => {
+  const query = locationQuery.value.trim();
+  if (query) {
+    return query.split(',')[0];
+  }
+  if (Number.isFinite(latitude.value) && Number.isFinite(longitude.value)) {
+    return 'Pinned location';
+  }
+  return 'Choose a place';
+});
+const selectedPlaceSubtitle = computed(() => {
+  if (locationStatus.value) {
+    return locationStatus.value;
+  }
+  if (Number.isFinite(latitude.value) && Number.isFinite(longitude.value)) {
+    return `${latitude.value.toFixed(4)}, ${longitude.value.toFixed(4)}`;
+  }
+  return 'Search on the right or use your current location';
+});
 
 const handleImageUpload = (event) => {
   const file = event.target.files[0];
-  if (file && (file.type === "image/jpeg" || file.type === "image/png")) {
+  if (file && (file.type === 'image/jpeg' || file.type === 'image/png')) {
     imagePreview.value = URL.createObjectURL(file);
     imageFileName.value = file.name;
     imageFile.value = file;
@@ -99,6 +121,10 @@ const resolveLocation = async () => {
   }
 };
 
+function selectMapCoordinates({ lat, lng }) {
+  applyCoordinates(lat, lng, 'Pinned from map');
+}
+
 const createEventListner = async () => {
   if (longitude.value == null || latitude.value == null) {
     const resolved = await resolveLocation();
@@ -163,288 +189,474 @@ const createEventListner = async () => {
   }
 };
 
-function dropLayerandBack() {
+function closeSheet() {
   groups.currentGroupIdForEvents = null;
   pages.dropLayer();
 }
 </script>
 
 <template>
-  <Page :title="title">
-    <form class="add-event-form soft-panel" @submit.prevent>
-      <div>
-        <p class="eyebrow">Create event</p>
-        <h2>Make it easy for people to show up.</h2>
-        <p class="section-copy">Set the place, tone, and details clearly so the map preview feels trustworthy at a glance.</p>
+  <section class="event-sheet soft-panel event-sheet--create">
+    <header class="event-sheet__header">
+      <div class="event-sheet__identity">
+        <img :src="activeLogo" alt="Bee2Gether logo" />
+        <span>Bee2Gether</span>
+        <span class="event-sheet__divider"></span>
+        <strong>Create event</strong>
       </div>
+      <button type="button" class="event-sheet__icon-btn" aria-label="Close create event" @click="closeSheet">
+        <svg-icon :path="mdiClose" width="1.1rem" height="1.1rem" />
+      </button>
+    </header>
 
-      <div class="image-upload-container">
-        <input id="event-image-input" type="file" accept="image/png, image/jpeg" hidden @change="handleImageUpload" />
-        <label
-          for="event-image-input"
-          class="image-upload-label"
-          :style="imagePreview ? `background-image: url(${imagePreview})` : ''"
-        >
-          <div v-if="!imagePreview" class="image-overlay">
-            <svg-icon :path="mdiCamera" width="1.5rem" class="icon" />
-            <span>Upload Event Image</span>
+    <div class="event-sheet__body">
+      <section class="event-sheet__main">
+        <div class="event-sheet__intro">
+          <h2>Create an event</h2>
+          <p>Set the vibe, place, and time so people can say yes quickly.</p>
+        </div>
+
+        <section class="editor-section">
+          <h3>Basics</h3>
+
+          <label class="field-group">
+            <span>Event name</span>
+            <input v-model="eventName" class="field" type="text" placeholder="Sunset coffee walk" />
+          </label>
+
+          <label class="field-group">
+            <span>Description</span>
+            <textarea v-model="description" class="textarea" placeholder="Add a short description people can scan fast."></textarea>
+          </label>
+
+          <div class="editor-row">
+            <label class="field-group">
+              <span>Date</span>
+              <input v-model="date" class="field" type="date" />
+            </label>
+
+            <div class="field-group">
+              <span>Cover image</span>
+              <input id="event-image-input" type="file" accept="image/png, image/jpeg" hidden @change="handleImageUpload" />
+              <label
+                for="event-image-input"
+                class="image-upload-label"
+                :style="imagePreview ? `background-image: url(${imagePreview})` : ''"
+              >
+                <div v-if="!imagePreview" class="image-overlay">
+                  <svg-icon :path="mdiCamera" width="1.2rem" height="1.2rem" />
+                  <span>Upload cover image</span>
+                  <small>PNG or JPEG</small>
+                </div>
+              </label>
+              <p v-if="imagePreview" class="image-name">{{ imageFileName }}</p>
+            </div>
           </div>
-        </label>
-        <div v-if="imagePreview" class="image-name">
-          <span>{{ imageFileName }}</span>
-        </div>
-      </div>
 
-      <label class="field-group">
-        <span>Event name</span>
-        <input v-model="eventName" class="field" type="text" placeholder="Sunset coffee walk" />
-      </label>
-      <label class="field-group">
-        <span>Date</span>
-        <input v-model="date" class="field" type="date" placeholder="Date" />
-      </label>
+          <div class="field-group">
+            <span>Tags</span>
+            <div class="tags-input">
+              <div class="tags-list">
+                <span v-for="(tag, index) in tags" :key="index" class="tag">
+                  {{ tag }}
+                  <button class="delete-tag" @click.prevent="removeTag(tag)">x</button>
+                </span>
+                <input
+                  v-model="tagInput"
+                  type="text"
+                  placeholder="Add tags"
+                  class="tag-input-field"
+                  @keyup.space="addTag"
+                />
+              </div>
+              <div class="tag-instructions">Press space after each tag. {{ tagsLimit - tags.length }} tags remaining.</div>
+            </div>
+          </div>
 
-      <div class="location-section">
-        <span class="location-label">Location</span>
-        <div class="location-input-row">
-          <input
-            v-model="locationQuery"
-            class="field"
-            type="text"
-            placeholder="Search for a location"
-            :disabled="searchingLocation"
-          />
-          <button type="button" class="btn btn-primary inline-btn" @click="resolveLocation">
-            <svg-icon :path="mdiMapMarker" width="1.1rem" />
-            <span>{{ searchingLocation ? 'Searching...' : 'Find' }}</span>
+          <p v-if="errorMsg" class="error-inline">{{ errorMsg }}</p>
+        </section>
+      </section>
+
+      <aside class="event-sheet__side">
+        <div class="side-pane">
+          <div class="side-pane__toolbar">
+            <label class="location-search">
+              <svg-icon :path="mdiMagnify" width="1rem" height="1rem" />
+              <input
+                v-model="locationQuery"
+                type="text"
+                placeholder="Search location"
+                :disabled="searchingLocation"
+                @keydown.enter.prevent="resolveLocation"
+              />
+            </label>
+            <button type="button" class="location-refresh" aria-label="Search location" @click="resolveLocation">
+              <svg-icon :path="mdiRefresh" width="0.95rem" height="0.95rem" />
+            </button>
+          </div>
+
+          <button type="button" class="location-chip" @click="useCurrentLocation">
+            <svg-icon :path="mdiMapMarkerRadiusOutline" width="0.95rem" height="0.95rem" />
+            <span>Use current location</span>
           </button>
-        </div>
-        <button type="button" class="btn btn-secondary inline-btn" @click="useCurrentLocation">
-          <svg-icon :path="mdiCrosshairsGps" width="1.1rem" />
-          <span>Use Current Location</span>
-        </button>
-        <p v-if="locationStatus" class="location-status">{{ locationStatus }}</p>
-      </div>
 
-      <label class="field-group">
-        <span>Description</span>
-        <textarea class="textarea" v-model="description" placeholder="Tell people what kind of event this is."></textarea>
-      </label>
-
-      <div class="tags-input">
-        <div class="tags-list">
-          <span v-for="(tag, index) in tags" :key="index" class="tag">
-            {{ tag }}
-            <button class="delete-tag" @click.prevent="removeTag(tag)">x</button>
-          </span>
-          <input
-            v-model="tagInput"
-            type="text"
-            placeholder="Add a tag"
-            class="tag-input-field"
-            @keyup.space="addTag"
+          <EventSheetMap
+            :coordinates="{ lat: latitude, lng: longitude }"
+            :user-coordinates="userLocation.location"
+            :summary-title="selectedPlaceTitle"
+            :summary-subtitle="selectedPlaceSubtitle"
+            interactive
+            @select-coordinates="selectMapCoordinates"
           />
         </div>
-        <div class="tag-instructions">
-          Press the spacebar after each tag.
-          {{ tagsLimit - tags.length }} tags are remaining
-        </div>
-        <button type="button" class="btn btn-ghost remove-all-btn" @click="tags = []">
-          Remove All
-        </button>
-      </div>
-
-      <div class="form-actions">
-        <button type="button" class="btn btn-primary create-btn" @click="createEventListner">Create Event</button>
-        <button type="button" class="btn btn-secondary forget-btn" @click="dropLayerandBack">Cancel</button>
-      </div>
-    </form>
-
-    <div v-if="errorMsg" class="error-popup soft-panel">
-      <p class="error-message">{{ errorMsg }}</p>
-      <button class="btn btn-secondary error-dismiss-btn" @click="errorMsg = ''">Dismiss</button>
+      </aside>
     </div>
-  </Page>
+
+    <footer class="event-sheet__footer">
+      <button type="button" class="btn btn-secondary" @click="closeSheet">Cancel</button>
+      <button type="button" class="btn btn-primary" @click="createEventListner">Create event</button>
+    </footer>
+  </section>
 </template>
 
 <style scoped lang="scss">
-.add-event-form {
+.event-sheet {
+  width: min(100%, 69rem);
+  height: min(43rem, calc(100dvh - var(--topbar-height) - 1.55rem));
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1.25rem;
-  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border-radius: calc(var(--radius-lg) + 0.25rem);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 84%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow:
+    0 28px 70px rgba(23, 18, 12, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
 
-  h2 {
-    margin: 0.8rem 0 0.55rem;
-    font-family: var(--font-display);
-    font-size: clamp(1.7rem, 3vw, 2.3rem);
-    letter-spacing: -0.05em;
+.event-sheet__header,
+.event-sheet__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.95rem 1.15rem;
+}
+
+.event-sheet__header {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+}
+
+.event-sheet__footer {
+  justify-content: flex-end;
+  border-top: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 98%, transparent);
+  padding-block: 1.1rem;
+  padding-inline: 1.35rem;
+}
+
+.event-sheet__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--ink-soft);
+  font-size: 0.96rem;
+
+  img {
+    width: 1.65rem;
+    height: 1.65rem;
+  }
+
+  strong {
+    color: var(--ink);
+    font-weight: 700;
   }
 }
 
-.image-upload-container {
-  text-align: center;
+.event-sheet__divider {
+  width: 1px;
+  height: 1.15rem;
+  background: color-mix(in srgb, var(--border) 95%, transparent);
+}
+
+.event-sheet__icon-btn {
+  width: 2.65rem;
+  height: 2.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  color: var(--ink);
+}
+
+.event-sheet__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(22rem, 0.9fr);
+}
+
+.event-sheet__main,
+.event-sheet__side {
+  min-width: 0;
+  min-height: 0;
+}
+
+.event-sheet__main {
+  padding: 1.5rem 1.5rem 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.event-sheet__side {
+  padding: 1rem;
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-strong) 60%, transparent);
+}
+
+.event-sheet__intro {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 1.35rem;
+
+  h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 3vw, 2.7rem);
+    line-height: 0.96;
+    letter-spacing: -0.06em;
+  }
+
+  p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 1rem;
+  }
+}
+
+.editor-section {
+  display: grid;
+  gap: 1rem;
+
+  h3 {
+    margin: 0;
+    font-size: 1.12rem;
+  }
+}
+
+.field-group {
+  display: grid;
+  gap: 0.5rem;
+
+  span {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--ink-soft);
+  }
+}
+
+.editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(15rem, 0.95fr);
+  gap: 1rem;
+  align-items: start;
 }
 
 .image-upload-label {
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 10.8rem;
+  border-radius: 1.2rem;
+  background: linear-gradient(145deg, var(--canvas-strong), var(--surface));
   background-size: cover;
   background-position: center;
-  border-radius: var(--radius-lg);
-  width: 100%;
-  min-height: 14rem;
-  background: linear-gradient(145deg, var(--canvas-strong), var(--surface));
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed color-mix(in srgb, var(--border-strong) 94%, transparent);
   cursor: pointer;
-  transition: transform var(--transition-fast), border-color var(--transition-fast);
-
-  &:hover {
-    transform: translateY(-2px);
-    border-color: var(--accent);
-  }
 }
 
 .image-overlay {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: grid;
+  gap: 0.28rem;
+  justify-items: center;
   color: var(--ink-soft);
-  gap: 0.65rem;
-}
 
-.image-name {
-  margin-top: 0.75rem;
-
-  span {
+  small {
     color: var(--ink-muted);
   }
 }
 
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
+.image-name {
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
 
-  span {
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: var(--ink-soft);
+.side-pane {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.85rem;
+}
+
+.side-pane__toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0;
+}
+
+.location-search {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.88rem 0.95rem;
+  border-radius: 1rem 0 0 1rem;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border-right: none;
+  color: var(--ink-muted);
+
+  input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    outline: none;
+    font: inherit;
   }
 }
 
-.location-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.location-label {
-  font-size: 0.9rem;
-  font-weight: 700;
+.location-refresh {
+  width: 3.2rem;
+  border-radius: 0 1rem 1rem 0;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   color: var(--ink-soft);
 }
 
-.location-input-row {
-  display: flex;
-  gap: 0.65rem;
-}
-
-.inline-btn {
-  white-space: nowrap;
-}
-
-.location-status {
-  margin: 0.2rem 0 0;
-  color: var(--secondary);
-  font-size: 0.9rem;
-}
-
-.textarea {
-  min-height: 9rem;
-  resize: vertical;
+.location-chip {
+  width: 100%;
+  margin: 0;
+  padding: 0.8rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .tags-input {
-  background: var(--surface-strong);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  padding: 0.85rem;
-  width: 100%;
-  min-height: 9rem;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
 }
 
 .tags-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-bottom: 0.75rem;
+  gap: 0.45rem;
 }
 
 .tag {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  background: var(--accent-soft);
+  gap: 0.35rem;
+  padding: 0.42rem 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent-strong);
-  border-radius: var(--radius-pill);
-  padding: 0.45rem 0.75rem;
   font-weight: 700;
 }
 
 .delete-tag {
-  background-color: transparent;
   border: none;
-  margin-left: 0.45rem;
-  cursor: pointer;
+  background: transparent;
   color: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .tag-input-field {
-  flex-grow: 1;
+  flex: 1;
+  min-width: 8rem;
   border: none;
   outline: none;
-  padding: 0.35rem 0.15rem;
   background: transparent;
   color: var(--ink);
+  font: inherit;
 }
 
 .tag-instructions {
-  font-size: 0.85rem;
   color: var(--ink-muted);
-  margin-bottom: 0.75rem;
+  font-size: 0.82rem;
 }
 
-.form-actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.error-popup {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 1.15rem;
-  border-radius: var(--radius-md);
-}
-
-.error-message {
+.error-inline {
   margin: 0;
   color: var(--danger);
   font-weight: 700;
 }
 
-@media (max-width: 720px) {
-  .location-input-row {
-    flex-direction: column;
+@media (max-width: 980px) {
+  .event-sheet {
+    width: min(100%, 48rem);
+    height: min(45rem, calc(100dvh - var(--topbar-height) - 1rem));
   }
 
-  .form-actions,
-  .error-popup {
-    flex-direction: column;
-    align-items: stretch;
+  .event-sheet__body {
+    grid-template-columns: 1fr;
+  }
+
+  .event-sheet__side {
+    border-left: none;
+    border-top: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+  }
+
+  .side-pane {
+    grid-template-rows: auto auto 18rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .event-sheet {
+    width: min(100%, calc(100% - 0.8rem));
+    height: calc(100dvh - var(--topbar-height) - 0.7rem);
+    border-radius: 1.25rem;
+  }
+
+  .event-sheet__header,
+  .event-sheet__footer {
+    padding-inline: 0.9rem;
+  }
+
+  .event-sheet__main {
+    padding: 1rem 1rem 0;
+  }
+
+  .event-sheet__side {
+    padding: 0.9rem;
+  }
+
+  .editor-row {
+    grid-template-columns: 1fr;
+  }
+
+  .side-pane__toolbar {
+    padding: 0;
+  }
+
+  .location-chip {
+    width: 100%;
   }
 }
 </style>

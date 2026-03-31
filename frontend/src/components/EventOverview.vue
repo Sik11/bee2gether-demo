@@ -1,22 +1,43 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
+import {
+  mdiAccountGroup,
+  mdiClose,
+  mdiContentCopy,
+  mdiDeleteOutline,
+  mdiHeartOutline,
+  mdiMapMarker,
+} from '@mdi/js';
+import EventSheetMap from './helper/EventSheetMap.vue';
+import svgIcon from './helper/svg-icon.vue';
+import Avatar from './helper/Avatar.vue';
 import { pages } from '../store/pages';
-import Page from './helper/Page.vue';
 import { sendJoinEvent, sendLeaveEvent, removeEvent, events, findEventAttendees, toggleSavedEvent } from '../store/events';
 import { auth } from '../store/auth';
 import { userLocation } from '../store/userLocation';
 import { addEventComment, deleteEventComment, getEventComments, getEventExportUrl } from '../api';
-import heartBackground from '../assets/heart-background-full.png';
-import Avatar from './helper/Avatar.vue';
 import { formatDistanceLabel, formatEventDate } from '../utils/eventMeta';
+import { settings } from '../store/settings';
+import logo from '../assets/logo.png';
+import darkLogo from '../assets/dark-logo.png';
 
 const msg = ref('');
 const showJoin = ref(true);
 const comments = ref([]);
 const commentBody = ref('');
+
+const activeLogo = computed(() => (settings.isDarkMode ? darkLogo : logo));
 const isSaved = computed(() => events.isEventSaved(events.selected.id));
 const isOwner = computed(() => events.selected.userId === auth.user.userId);
 const distanceLabel = computed(() => formatDistanceLabel(userLocation.location, events.selected));
+const summaryTitle = computed(() => events.selected.name || 'Event location');
+const summarySubtitle = computed(() => {
+  if (distanceLabel.value) {
+    return `${distanceLabel.value} · ${events.selected.lat?.toFixed?.(4) ?? '--'}, ${events.selected.long?.toFixed?.(4) ?? '--'}`;
+  }
+  return `${events.selected.lat?.toFixed?.(4) ?? '--'}, ${events.selected.long?.toFixed?.(4) ?? '--'}`;
+});
+const eventExportUrl = computed(() => (events.selected.id ? getEventExportUrl(events.selected.id) : '#'));
 
 const join = async () => {
   const response = await sendJoinEvent(auth.user.userId, auth.user.username, events.selected.id);
@@ -37,7 +58,7 @@ const onDelete = async () => {
   pages.dropLayer();
 };
 
-function backtoMap() {
+function closeSheet() {
   msg.value = '';
   events.clearSelectedEvent();
   pages.dropLayer('event-overview');
@@ -83,10 +104,6 @@ async function removeComment(commentId) {
   }
 }
 
-const eventExportUrl = computed(() => (
-  events.selected.id ? getEventExportUrl(events.selected.id) : '#'
-));
-
 watch(() => events.selected.id, loadComments, { immediate: true });
 
 watch(() => events.selected.attendees, () => {
@@ -94,241 +111,462 @@ watch(() => events.selected.attendees, () => {
     return;
   }
 
-  showJoin.value = !events.selected.attendees.some(attendee => attendee.userId === auth.user.userId);
+  showJoin.value = !events.selected.attendees.some((attendee) => attendee.userId === auth.user.userId);
 }, { immediate: true });
 
 onMounted(loadComments);
 </script>
 
 <template>
-  <Page title="Event Info">
-    <article id="form" class="soft-panel">
-      <div class="img-container">
-        <img v-if="events.selected['eventImg(s)'][0]" :src="events.selected['eventImg(s)'][0]" alt="Event image" />
-        <img v-else :src="heartBackground" alt="Event image" />
+  <section class="event-sheet soft-panel event-sheet--view">
+    <header class="event-sheet__header">
+      <div class="event-sheet__identity">
+        <img :src="activeLogo" alt="Bee2Gether logo" />
+        <span>Bee2Gether</span>
+        <span class="event-sheet__divider"></span>
+        <strong>Event details</strong>
       </div>
+      <button type="button" class="event-sheet__icon-btn" aria-label="Close event info" @click="closeSheet">
+        <svg-icon :path="mdiClose" width="1.1rem" height="1.1rem" />
+      </button>
+    </header>
 
-      <div class="info-container">
-        <p class="date">{{ events.selected.time }}</p>
-        <h2 class="name">{{ events.selected.name }}</h2>
+    <div class="event-sheet__body">
+      <section class="event-sheet__main">
+        <div class="event-sheet__intro">
+          <p class="eyebrow">Event info</p>
+          <h2>{{ events.selected.name }}</h2>
+          <p>{{ events.selected.description || 'No description yet.' }}</p>
+        </div>
 
-        <section>
-          <p class="sub-title">Description</p>
-          <p class="description">{{ events.selected.description }}</p>
-        </section>
+        <div class="event-hero" v-if="events.selected['eventImg(s)']?.[0]">
+          <img :src="events.selected['eventImg(s)'][0]" alt="Event cover" />
+        </div>
 
-        <section v-if="events.selected.tags?.length">
-          <p class="sub-title">Tags</p>
-          <ul class="tags">
-            <li v-for="tag in events.selected.tags" :key="tag">{{ tag }}</li>
-          </ul>
-        </section>
-
-        <section>
-          <p class="sub-title">Snapshot</p>
-          <div class="meta-grid">
-            <span class="meta-chip">{{ formatEventDate(events.selected.time) }}</span>
-            <span class="meta-chip">{{ events.selected.attendees?.length || 0 }} attending</span>
-            <span class="meta-chip">{{ distanceLabel }}</span>
-            <span class="meta-chip">{{ events.selected.groupId ? 'Group event' : 'Open event' }}</span>
-          </div>
-        </section>
-
-        <section>
-          <p class="sub-title">Organiser</p>
-          <div class="account">
-            <Avatar :username="events.selected.username" custom-class="pfp"/>
-            <div class="text">
-              <div class="username">{{ events.selected.username }}</div>
-              <div class="id">#{{ events.selected.userId?.substring(0, 6) }}</div>
+        <section class="detail-stack">
+          <div class="detail-grid">
+            <div class="detail-block">
+              <span class="detail-label">When</span>
+              <strong>{{ formatEventDate(events.selected.time) }}</strong>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Attendance</span>
+              <strong>{{ events.selected.attendees?.length || 0 }} going</strong>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Distance</span>
+              <strong>{{ distanceLabel }}</strong>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Type</span>
+              <strong>{{ events.selected.groupId ? 'Group event' : 'Open event' }}</strong>
             </div>
           </div>
-        </section>
 
-        <section>
-          <p class="sub-title">Attendees</p>
-          <div v-if="events.selected.attendees?.length" class="attendees">
-            <div class="account" v-for="attendee in events.selected.attendees" :key="attendee.userId">
-              <Avatar :username="attendee.username" custom-class="pfp"/>
-              <div class="text">
-                <div class="username">{{ attendee.username }}</div>
-                <div class="id">#{{ attendee.userId.substring(0, 6) }}</div>
-              </div>
+          <div class="organiser-row">
+            <Avatar :username="events.selected.username" custom-class="organiser-row__avatar" />
+            <div>
+              <span class="detail-label">Organiser</span>
+              <strong>{{ events.selected.username }}</strong>
+              <small>#{{ events.selected.userId?.substring(0, 6) }}</small>
             </div>
           </div>
-          <p v-else class="section-copy">No attendees yet.</p>
-        </section>
 
-        <section>
-          <div class="comments-head">
-            <p class="sub-title">Comments</p>
-            <span class="meta-chip">{{ comments.length }} total</span>
+          <div v-if="events.selected.tags?.length" class="tag-row">
+            <span v-for="tag in events.selected.tags" :key="tag" class="tag-pill">{{ tag }}</span>
           </div>
-          <div class="comment-compose">
-            <textarea v-model="commentBody" class="textarea" rows="3" placeholder="Add a comment for this event"></textarea>
-            <button type="button" class="btn btn-primary" @click="postComment">Post comment</button>
-          </div>
-          <div v-if="comments.length" class="comments-list">
-            <article v-for="comment in comments" :key="comment.id" class="comment-card">
-              <div class="comment-head">
-                <strong>{{ comment.username }}</strong>
-                <button
-                  v-if="comment.userId === auth.user.userId || isOwner"
-                  type="button"
-                  class="btn btn-ghost comment-delete"
-                  @click="removeComment(comment.id)"
-                >
-                  Remove
-                </button>
+
+          <details class="fold-section">
+            <summary>
+              <span>Attendees</span>
+              <span>{{ events.selected.attendees?.length || 0 }}</span>
+            </summary>
+            <div class="fold-section__body">
+              <div v-if="events.selected.attendees?.length" class="attendees-list">
+                <div v-for="attendee in events.selected.attendees" :key="attendee.userId" class="attendee-row">
+                  <Avatar :username="attendee.username" custom-class="attendee-row__avatar" />
+                  <div>
+                    <strong>{{ attendee.username }}</strong>
+                    <small>#{{ attendee.userId.substring(0, 6) }}</small>
+                  </div>
+                </div>
               </div>
-              <p>{{ comment.body }}</p>
-            </article>
-          </div>
-          <p v-else class="section-copy">No comments yet.</p>
-        </section>
-      </div>
-    </article>
+              <p v-else class="section-copy">No attendees yet.</p>
+            </div>
+          </details>
 
-    <div class="action-row">
-      <button v-if="isOwner" class="btn btn-danger overview-btn" @click="onDelete">Delete Event</button>
-      <button v-else-if="showJoin" class="btn btn-primary overview-btn" @click="join">Join Event</button>
-      <button v-else class="btn btn-secondary overview-btn" @click="leave">Leave Event</button>
-      <button class="btn btn-secondary overview-btn" @click="saveEvent">{{ isSaved ? 'Saved' : 'Interested' }}</button>
-      <button class="btn btn-secondary overview-btn" @click="copyEventLink">Copy Link</button>
-      <a class="btn btn-secondary overview-btn" :href="eventExportUrl">Export .ics</a>
-      <button class="btn btn-secondary overview-btn" @click="backtoMap">Back To Map</button>
+          <details class="fold-section">
+            <summary>
+              <span>Comments</span>
+              <span>{{ comments.length }}</span>
+            </summary>
+            <div class="fold-section__body fold-section__body--comments">
+              <div class="comment-compose">
+                <textarea v-model="commentBody" class="textarea" rows="3" placeholder="Add a comment for this event"></textarea>
+                <button type="button" class="btn btn-primary" @click="postComment">Post comment</button>
+              </div>
+              <div v-if="comments.length" class="comments-list">
+                <article v-for="comment in comments" :key="comment.id" class="comment-card">
+                  <div class="comment-head">
+                    <strong>{{ comment.username }}</strong>
+                    <button
+                      v-if="comment.userId === auth.user.userId || isOwner"
+                      type="button"
+                      class="comment-delete"
+                      @click="removeComment(comment.id)"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <p>{{ comment.body }}</p>
+                </article>
+              </div>
+              <p v-else class="section-copy">No comments yet.</p>
+            </div>
+          </details>
+        </section>
+
+        <p v-if="msg === 'OK'" class="success-msg">Success!</p>
+        <p v-else-if="msg" class="error-msg">{{ msg }}</p>
+      </section>
+
+      <aside class="event-sheet__side">
+        <div class="side-pane">
+          <EventSheetMap
+            :coordinates="{ lat: events.selected.lat, lng: events.selected.long }"
+            :user-coordinates="userLocation.location"
+            :summary-title="summaryTitle"
+            :summary-subtitle="summarySubtitle"
+          />
+        </div>
+      </aside>
     </div>
 
-    <p v-if="msg === 'OK'" class="success-msg">Success!</p>
-    <p v-else class="error-msg">{{ msg }}</p>
-  </Page>
+    <footer class="event-sheet__footer event-sheet__footer--wrap">
+      <button v-if="isOwner" class="btn btn-danger" @click="onDelete">
+        <svg-icon :path="mdiDeleteOutline" width="1rem" height="1rem" />
+        <span>Delete</span>
+      </button>
+      <button v-else-if="showJoin" class="btn btn-primary" @click="join">
+        <svg-icon :path="mdiAccountGroup" width="1rem" height="1rem" />
+        <span>Join event</span>
+      </button>
+      <button v-else class="btn btn-secondary" @click="leave">
+        <svg-icon :path="mdiAccountGroup" width="1rem" height="1rem" />
+        <span>Leave event</span>
+      </button>
+      <button class="btn btn-secondary" @click="saveEvent">
+        <svg-icon :path="mdiHeartOutline" width="1rem" height="1rem" />
+        <span>{{ isSaved ? 'Saved' : 'Interested' }}</span>
+      </button>
+      <button class="btn btn-secondary" @click="copyEventLink">
+        <svg-icon :path="mdiContentCopy" width="1rem" height="1rem" />
+        <span>Copy link</span>
+      </button>
+      <a class="btn btn-secondary" :href="eventExportUrl">
+        <svg-icon :path="mdiMapMarker" width="1rem" height="1rem" />
+        <span>Export .ics</span>
+      </a>
+      <button class="btn btn-secondary" @click="closeSheet">Close</button>
+    </footer>
+  </section>
 </template>
 
 <style scoped lang="scss">
-#form {
-  border-radius: var(--radius-lg);
+.event-sheet {
+  width: min(100%, 69rem);
+  height: min(43rem, calc(100dvh - var(--topbar-height) - 1.55rem));
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  text-align: left;
+  border-radius: calc(var(--radius-lg) + 0.3rem);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 88%, transparent);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  box-shadow:
+    0 28px 70px rgba(23, 18, 12, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
 
-  .img-container {
-    width: 100%;
-    height: clamp(15rem, 34vw, 23rem);
-    overflow: hidden;
+.event-sheet__header,
+.event-sheet__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+}
 
-    img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
+.event-sheet__footer {
+  justify-content: flex-end;
+  border-bottom: none;
+  border-top: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 98%, transparent);
+  padding-block: 1.1rem;
+  padding-inline: 1.35rem;
+}
+
+.event-sheet__footer--wrap {
+  flex-wrap: wrap;
+}
+
+.event-sheet__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--ink-soft);
+  font-size: 0.96rem;
+
+  img {
+    width: 1.65rem;
+    height: 1.65rem;
   }
 
-  .info-container {
-    display: grid;
-    gap: 1rem;
-    padding: 1.15rem;
-  }
-
-  .date {
-    margin: 0;
-    color: var(--ink-muted);
-    font-size: 0.82rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .name {
-    margin: -0.4rem 0 0;
-    font-family: var(--font-display);
-    font-size: clamp(1.8rem, 3vw, 2.5rem);
-    line-height: 0.98;
-    letter-spacing: -0.05em;
-  }
-
-  .sub-title {
-    margin: 0 0 0.5rem;
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: var(--ink-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .description,
-  .tags {
-    margin: 0;
-    color: var(--ink-soft);
-    line-height: 1.65;
-  }
-
-  .tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.55rem;
-    padding: 0;
-    list-style: none;
-  }
-
-  .tags li {
-    padding: 0.5rem 0.8rem;
-    border-radius: var(--radius-pill);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
-
-  .meta-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.55rem;
-  }
-
-  .meta-chip {
-    padding: 0.5rem 0.8rem;
-    border-radius: var(--radius-pill);
-    background: var(--surface-strong);
+  strong {
     color: var(--ink);
     font-weight: 700;
-    border: 1px solid var(--border);
-  }
-
-  .account {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin: 0.6rem 0 0;
-    min-height: 3.2rem;
-
-    .pfp {
-      width: 3rem;
-      height: 3rem;
-      border-radius: 100%;
-      overflow: hidden;
-    }
-
-    .text {
-      min-width: 0;
-    }
-
-    .username {
-      font-size: 1rem;
-      font-weight: 700;
-    }
-
-    .id {
-      font-size: 0.82rem;
-      color: var(--ink-muted);
-    }
   }
 }
 
-.action-row {
+.event-sheet__divider {
+  width: 1px;
+  height: 1.15rem;
+  background: color-mix(in srgb, var(--border) 95%, transparent);
+}
+
+.event-sheet__icon-btn {
+  width: 2.65rem;
+  height: 2.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  color: var(--ink);
+}
+
+.event-sheet__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(22rem, 0.9fr);
+}
+
+.event-sheet__main,
+.event-sheet__side {
+  min-width: 0;
+  min-height: 0;
+}
+
+.event-sheet__main {
+  padding: 1.5rem 1.5rem 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.event-sheet__side {
+  padding: 1rem;
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-strong) 60%, transparent);
+}
+
+.side-pane {
+  height: 100%;
+}
+
+.event-sheet__intro {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+
+  h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 3vw, 2.7rem);
+    line-height: 0.96;
+    letter-spacing: -0.06em;
+  }
+
+  p {
+    margin: 0;
+    color: var(--ink-soft);
+  }
+}
+
+.event-hero {
+  overflow: hidden;
+  border-radius: 1.45rem;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  margin-bottom: 1rem;
+
+  img {
+    display: block;
+    width: 100%;
+    height: 11.5rem;
+    object-fit: cover;
+  }
+}
+
+.detail-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.detail-block,
+.organiser-row,
+.fold-section {
+  padding: 0.95rem 1rem;
+  border-radius: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.detail-block {
+  display: grid;
+  gap: 0.25rem;
+
+  strong {
+    font-size: 0.98rem;
+  }
+}
+
+.detail-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.organiser-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+
+  strong,
+  small {
+    display: block;
+  }
+
+  small {
+    color: var(--ink-muted);
+    margin-top: 0.15rem;
+  }
+}
+
+.organiser-row__avatar,
+.attendee-row__avatar {
+  width: 2.65rem;
+  height: 2.65rem;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.tag-row {
   display: flex;
   flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.42rem 0.72rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.fold-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--ink);
+  list-style: none;
+}
+
+.fold-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.fold-section__body {
+  display: grid;
+  gap: 0.8rem;
+  padding-top: 0.85rem;
+}
+
+.fold-section__body--comments {
+  gap: 0.9rem;
+}
+
+.attendees-list,
+.comments-list,
+.comment-compose {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.attendee-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+
+  strong,
+  small {
+    display: block;
+  }
+
+  small {
+    color: var(--ink-muted);
+  }
+}
+
+.textarea {
+  min-height: 7.2rem;
+  resize: vertical;
+}
+
+.comment-card {
+  padding: 0.75rem 0.9rem;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+
+  p {
+    margin: 0.45rem 0 0;
+    color: var(--ink-soft);
+  }
+}
+
+.comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
 }
 
-.overview-btn {
-  flex: 1 1 12rem;
+.comment-delete {
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.section-copy,
+.success-msg,
+.error-msg {
+  margin: 0;
 }
 
 .success-msg {
@@ -337,42 +575,47 @@ onMounted(loadComments);
 
 .error-msg {
   color: var(--danger);
+  font-weight: 700;
 }
 
-.comments-head,
-.comment-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+@media (max-width: 980px) {
+  .event-sheet {
+    width: min(100%, 48rem);
+    height: min(45rem, calc(100dvh - var(--topbar-height) - 1rem));
+  }
+
+  .event-sheet__body {
+    grid-template-columns: 1fr;
+  }
+
+  .event-sheet__side {
+    border-left: none;
+    border-top: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
+  }
 }
 
-.comment-compose,
-.comments-list {
-  display: grid;
-  gap: 0.75rem;
-}
+@media (max-width: 720px) {
+  .event-sheet {
+    width: min(100%, calc(100% - 0.8rem));
+    height: calc(100dvh - var(--topbar-height) - 0.7rem);
+    border-radius: 1.25rem;
+  }
 
-.comment-card {
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius-md);
-  background: var(--surface-strong);
-  border: 1px solid var(--border);
-}
+  .event-sheet__header,
+  .event-sheet__footer {
+    padding-inline: 0.95rem;
+  }
 
-.comment-card p {
-  margin: 0.45rem 0 0;
-  color: var(--ink-soft);
-}
+  .event-sheet__main {
+    padding: 1rem 1rem 0;
+  }
 
-.comment-delete {
-  min-height: auto;
-  padding: 0;
-}
+  .event-sheet__side {
+    padding: 0.9rem;
+  }
 
-@media (max-width: 640px) {
-  .action-row {
-    flex-direction: column;
+  .detail-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

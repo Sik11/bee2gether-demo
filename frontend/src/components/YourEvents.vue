@@ -210,7 +210,7 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
               <h4>{{ event.name }}</h4>
               <p class="section-copy">{{ event.attendees?.length || 0 }} attending · {{ event.groupId ? 'Group event' : 'Open event' }}</p>
             </div>
-            <button type="button" class="btn btn-secondary" @click="clickedEvent(event)">Open</button>
+            <button type="button" class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">Open</button>
           </article>
         </section>
       </div>
@@ -383,9 +383,17 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
 .agenda-item {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 1rem;
   padding-top: 0.85rem;
   border-top: 1px solid var(--border);
+}
+
+.agenda-item .more-info-btn {
+  min-height: 3.15rem;
+  padding-inline: 1.35rem;
+  border-radius: var(--radius-pill);
+  align-self: center;
 }
 
 .month-grid {

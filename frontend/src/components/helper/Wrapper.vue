@@ -29,6 +29,7 @@ const iconMap = {
 const topbarCreateHiddenPages = ["map", "events", "account"];
 const showTopbarCreateAction = computed(() => !topbarCreateHiddenPages.includes(String(route.name)));
 const notificationsOpen = computed(() => route.query.notifications === '1');
+const overlayActive = computed(() => pages.layers.length > 0 || notificationsOpen.value);
 
 const overlayComponents = {
   'create-event': CreateEvent,
@@ -56,7 +57,7 @@ function toggleNotifications() {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div :class="['app-shell', { 'overlay-active': overlayActive }]">
     <header class="topbar">
       <div class="brand-block">
         <img :src="settings.isDarkMode ? darkLogo : logo" alt="Bee2Gether logo" />
@@ -113,12 +114,13 @@ function toggleNotifications() {
     </div>
 
     <div class="overlay-stack">
-      <component
-        :is="overlayComponents[layer]"
+      <div
         v-for="layer in pages.layers"
         :key="layer"
         class="overlay-card"
-      />
+      >
+        <component :is="overlayComponents[layer]" />
+      </div>
       <NotificationsPanel v-if="notificationsOpen" />
     </div>
 
@@ -328,13 +330,60 @@ function toggleNotifications() {
 
 .overlay-stack {
   position: fixed;
-  inset: var(--topbar-height) 0 calc(var(--bottom-nav-height) + 0.5rem) 0;
+  inset: var(--topbar-height) 0 0 0;
   z-index: 70;
   pointer-events: none;
 }
 
 .overlay-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;
+  padding: 0.75rem 1rem 0.8rem;
   pointer-events: auto;
+  background:
+    radial-gradient(circle at top center, color-mix(in srgb, var(--surface) 8%, transparent), transparent 24rem),
+    color-mix(in srgb, var(--canvas) 76%, transparent);
+  backdrop-filter: saturate(0.78) blur(7px);
+}
+
+.overlay-card :deep(.page-wrapper) {
+  width: min(100%, 46rem);
+  max-height: calc(100dvh - var(--topbar-height) - 2.3rem);
+  min-height: min(42rem, calc(100dvh - var(--topbar-height) - 2.3rem));
+  padding: 0;
+  gap: 0.75rem;
+  overflow: hidden;
+  border-radius: calc(var(--radius-lg) + 0.1rem);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 88%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow:
+    0 24px 60px rgba(18, 16, 12, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.35) inset;
+}
+
+.overlay-card :deep(.event-sheet) {
+  margin-top: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell.overlay-active .workspace :deep(.search-bar),
+.app-shell.overlay-active .workspace :deep(.filter),
+.app-shell.overlay-active .workspace :deep(.map-controls) {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.96);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.overlay-card :deep(.page-title) {
+  display: none;
 }
 
 .bottom-nav {
@@ -396,6 +445,22 @@ function toggleNotifications() {
 
   .app-shell {
     padding-bottom: calc(var(--bottom-nav-height) + 1rem);
+  }
+
+  .overlay-card {
+    padding: 0.75rem 0.75rem 1rem;
+  }
+
+  .overlay-stack {
+    inset: var(--topbar-height) 0 calc(var(--bottom-nav-height) + 0.35rem) 0;
+  }
+
+  .overlay-card :deep(.page-wrapper) {
+    width: 100%;
+  }
+
+  .overlay-card :deep(.event-sheet) {
+    width: 100%;
   }
 }
 
