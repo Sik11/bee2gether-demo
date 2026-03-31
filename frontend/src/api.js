@@ -76,6 +76,14 @@ export const createUser = async (username, password) =>
 export const loginUser = async (username, password) => 
   createRequestFunction('loginUser', 'POST', {username, password})()
 
+/**
+ * Continue as a browser-scoped guest user.
+ * @param {string} guestSessionId
+ * @return {Promise<{result: boolean, msg: string, userId?: string, username?: string, isGuest?: boolean}>}
+ */
+export const continueAsGuest = async (guestSessionId) =>
+  createRequestFunction('continueAsGuest', 'POST', { guestSessionId })()
+
 
 /**
  * Add join user to event

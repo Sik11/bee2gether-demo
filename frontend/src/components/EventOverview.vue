@@ -16,7 +16,7 @@ import { sendJoinEvent, sendLeaveEvent, removeEvent, events, findEventAttendees,
 import { auth } from '../store/auth';
 import { userLocation } from '../store/userLocation';
 import { addEventComment, deleteEventComment, getEventComments, getEventExportUrl } from '../api';
-import { formatDistanceLabel, formatEventDate } from '../utils/eventMeta';
+import { formatDistanceLabel, formatEventDate, formatEventDateWithRange, formatEventTimeRange } from '../utils/eventMeta';
 import { settings } from '../store/settings';
 import logo from '../assets/logo.png';
 import darkLogo from '../assets/dark-logo.png';
@@ -30,8 +30,12 @@ const activeLogo = computed(() => (settings.isDarkMode ? darkLogo : logo));
 const isSaved = computed(() => events.isEventSaved(events.selected.id));
 const isOwner = computed(() => events.selected.userId === auth.user.userId);
 const distanceLabel = computed(() => formatDistanceLabel(userLocation.location, events.selected));
-const summaryTitle = computed(() => events.selected.name || 'Event location');
+const summaryTitle = computed(() => events.selected.placeName || events.selected.name || 'Event location');
 const summarySubtitle = computed(() => {
+  const placeAddress = events.selected.placeAddress;
+  if (placeAddress) {
+    return placeAddress;
+  }
   if (distanceLabel.value) {
     return `${distanceLabel.value} · ${events.selected.lat?.toFixed?.(4) ?? '--'}, ${events.selected.long?.toFixed?.(4) ?? '--'}`;
   }
@@ -147,19 +151,27 @@ onMounted(loadComments);
           <div class="detail-grid">
             <div class="detail-block">
               <span class="detail-label">When</span>
-              <strong>{{ formatEventDate(events.selected.time) }}</strong>
+              <strong>{{ formatEventDateWithRange(events.selected) }}</strong>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Time</span>
+              <strong>{{ formatEventTimeRange(events.selected) }}</strong>
             </div>
             <div class="detail-block">
               <span class="detail-label">Attendance</span>
               <strong>{{ events.selected.attendees?.length || 0 }} going</strong>
             </div>
             <div class="detail-block">
+              <span class="detail-label">Type</span>
+              <strong>{{ events.selected.groupId ? 'Group event' : 'Open event' }}</strong>
+            </div>
+            <div class="detail-block">
               <span class="detail-label">Distance</span>
               <strong>{{ distanceLabel }}</strong>
             </div>
-            <div class="detail-block">
-              <span class="detail-label">Type</span>
-              <strong>{{ events.selected.groupId ? 'Group event' : 'Open event' }}</strong>
+            <div class="detail-block" v-if="events.selected.placeName || events.selected.placeAddress">
+              <span class="detail-label">Place</span>
+              <strong>{{ events.selected.placeName || events.selected.placeAddress }}</strong>
             </div>
           </div>
 

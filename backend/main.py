@@ -129,6 +129,8 @@ def _lookup_user(payload: dict[str, Any]) -> dict[str, Any] | None:
         return repository.get_user_by_id(payload["userId"])
     if payload.get("username"):
         return repository.get_user_by_username(payload["username"])
+    if payload.get("guestSessionId"):
+        return repository.get_user_by_guest_session(str(payload["guestSessionId"]))
     return None
 
 
@@ -151,6 +153,18 @@ def _require_group(group_id: str) -> dict[str, Any]:
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
     return group
+
+
+def _guest_username(guest_session_id: str) -> str:
+    base = f"guest-{guest_session_id.replace('-', '')[:6].lower() or uuid4().hex[:6]}"
+    candidate = base
+    suffix = 1
+    while True:
+        existing = repository.get_user_by_username(candidate)
+        if existing is None or existing.get("guestSessionId") == guest_session_id:
+            return candidate
+        suffix += 1
+        candidate = f"{base}-{suffix}"
 
 
 def _replace_group_event(group_id: str, event: dict[str, Any]) -> None:
@@ -331,13 +345,15 @@ def _build_ics_calendar(events_to_export: list[dict[str, Any]]) -> str:
                 "BEGIN:VEVENT",
                 f"UID:{event['id']}@bee2gether",
                 f"DTSTAMP:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
-                f"DTSTART:{_ics_datetime(event.get('time'))}",
+                f"DTSTART:{_ics_datetime(event.get('startTime') or event.get('time'))}",
                 f"SUMMARY:{_ics_escape(event.get('name', 'Bee2Gether Event'))}",
                 f"DESCRIPTION:{_ics_escape(description)}",
                 f"LOCATION:{_ics_escape(location)}",
-                "END:VEVENT",
             ]
         )
+        if event.get("endTime"):
+            lines.append(f"DTEND:{_ics_datetime(event.get('endTime'))}")
+        lines.append("END:VEVENT")
 
     lines.append("END:VCALENDAR")
     return "\r\n".join(lines)
@@ -462,6 +478,42 @@ async def login_user(request: Request) -> JSONResponse:
     if not password_matches:
         return _json_error("Username or password incorrect", 400)
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"]})
+
+
+@api_router.api_route("/continueAsGuest", methods=["POST"])
+async def continue_as_guest(request: Request) -> JSONResponse:
+    payload = await request.json()
+    guest_session_id = str(payload.get("guestSessionId", "")).strip()
+    if not guest_session_id:
+        return _json_error("guestSessionId is required", 400)
+
+    existing_user = repository.get_user_by_guest_session(guest_session_id)
+    if existing_user is not None:
+        return JSONResponse(
+            {
+                "result": True,
+                "msg": "OK",
+                "userId": existing_user["id"],
+                "username": existing_user["username"],
+                "isGuest": True,
+            }
+        )
+
+    user_id = str(uuid4())
+    username = _guest_username(guest_session_id)
+    repository.create_user(
+        {
+            "id": user_id,
+            "username": username,
+            "eventsAttending": [],
+            "groupsMember": [],
+            "savedEvents": [],
+            "notifications": [],
+            "isGuest": True,
+            "guestSessionId": guest_session_id,
+        }
+    )
+    return JSONResponse({"result": True, "msg": "OK", "userId": user_id, "username": username, "isGuest": True})
 
 
 @api_router.api_route("/getUserInfo", methods=["POST"])
@@ -591,7 +643,9 @@ async def create_event(request: Request) -> JSONResponse:
     event = {
         "id": event_id,
         "name": name,
-        "time": payload.get("time"),
+        "time": payload.get("startTime") or payload.get("time"),
+        "startTime": payload.get("startTime") or payload.get("time"),
+        "endTime": payload.get("endTime"),
         "long": _coerce_float(payload.get("long"), "coordinate"),
         "lat": _coerce_float(payload.get("lat"), "coordinate"),
         "description": payload.get("description", ""),
@@ -600,6 +654,8 @@ async def create_event(request: Request) -> JSONResponse:
         "userId": user_id,
         "username": username,
         "ongoing": payload.get("ongoing", True),
+        "placeName": payload.get("placeName", ""),
+        "placeAddress": payload.get("placeAddress", ""),
         "eventImg(s)": [],
         "attendees": [{"userId": user_id, "username": username}],
         "comments": [],
@@ -1179,9 +1235,13 @@ async def update_event(request: Request) -> JSONResponse:
     if event is None:
         return _json_error("Event not found")
 
-    for field in ("time", "description", "tags", "ongoing", "name"):
+    for field in ("time", "startTime", "endTime", "description", "tags", "ongoing", "name", "placeName", "placeAddress"):
         if field in payload:
             event[field] = payload[field]
+    if "startTime" in payload:
+        event["time"] = payload["startTime"]
+    elif "time" in payload and "startTime" not in payload:
+        event["startTime"] = payload["time"]
     if "long" in payload:
         event["long"] = _coerce_float(payload["long"], "coordinate")
     if "lat" in payload:

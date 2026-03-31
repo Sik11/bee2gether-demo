@@ -38,8 +38,19 @@ class MemoryRepository:
                 return _clean(user)
         return None
 
+    def get_user_by_guest_session(self, guest_session_id: str) -> dict[str, Any] | None:
+        for user in self.users.values():
+            if user.get("guestSessionId") == guest_session_id:
+                return _clean(user)
+        return None
+
     def list_users(self) -> list[dict[str, Any]]:
         return [_clean(user) for user in self.users.values()]
+
+    def clear_all(self) -> None:
+        self.users.clear()
+        self.events.clear()
+        self.groups.clear()
 
     def create_event(self, event: dict[str, Any]) -> dict[str, Any]:
         self.events[event["id"]] = deepcopy(event)
@@ -105,6 +116,7 @@ class MongoRepository:
         self.groups = self.database["groups"]
         self.users.create_index("id", unique=True)
         self.users.create_index("username", unique=True)
+        self.users.create_index("guestSessionId", unique=True, sparse=True)
         self.events.create_index("id", unique=True)
         self.events.create_index("name", unique=True)
         self.groups.create_index("id", unique=True)
@@ -128,8 +140,16 @@ class MongoRepository:
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         return _clean(self.users.find_one({"username": username}))
 
+    def get_user_by_guest_session(self, guest_session_id: str) -> dict[str, Any] | None:
+        return _clean(self.users.find_one({"guestSessionId": guest_session_id}))
+
     def list_users(self) -> list[dict[str, Any]]:
         return [_clean(user) for user in self.users.find({})]
+
+    def clear_all(self) -> None:
+        self.users.delete_many({})
+        self.events.delete_many({})
+        self.groups.delete_many({})
 
     def create_event(self, event: dict[str, Any]) -> dict[str, Any]:
         payload = deepcopy(event)

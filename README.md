@@ -63,6 +63,35 @@ Defaults:
 
 Environment variables live in [`backend/.env.example`](backend/.env.example).
 
+### Demo Data Seeding
+
+To populate the database with a repeatable UK-wide demo social graph:
+
+```bash
+cd cloudAppBeeCW-1
+source .venv/bin/activate
+python -m backend.seed_demo_data
+```
+
+This seeds:
+
+- 50 users
+- 12 groups
+- 75 upcoming UK events
+- comments, group chat, saved events, and notifications
+
+All seeded demo users share the same login password:
+
+```text
+demo1234567
+```
+
+If you only want to populate an empty database:
+
+```bash
+python -m backend.seed_demo_data --seed-if-empty
+```
+
 ### 2. Frontend
 
 ```bash
@@ -77,6 +106,8 @@ Optional frontend env vars:
 
 - `VITE_API_BASE_URL` to call a remote backend directly instead of using the local proxy
 - `VITE_API_CODE` if you want to keep the old query param shape with a custom demo token
+
+Guest access now uses a browser-scoped guest session instead of a single shared `guest` account, so guest history persists per browser across reloads.
 
 ## Render Deployment
 

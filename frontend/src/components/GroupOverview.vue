@@ -7,7 +7,7 @@ import { events } from '../store/events.js';
 import heartBackground from '../assets/heart-background.png';
 import { auth } from '../store/auth';
 import { getGroupChatMessages, sendGroupChatMessage } from '../api';
-import { formatEventDate } from '../utils/eventMeta';
+import { formatEventDate, formatEventTimeRange } from '../utils/eventMeta';
 
 const emit = defineEmits(['backToMap']);
 
@@ -108,9 +108,9 @@ onUnmounted(() => {
           <img :src="event['eventImg(s)'][0] || heartBackground" alt="Event image" />
         </div>
         <div class="event-copy">
-          <p class="event-date">{{ new Date(event.time).toLocaleDateString() }}</p>
+          <p class="event-date">{{ formatEventDate(event) }}</p>
           <h3 class="event-name">{{ event.name }}</h3>
-          <p class="event-description">{{ formatEventDate(event.time) }} · {{ event.attendees?.length || 0 }} attending</p>
+          <p class="event-description">{{ formatEventTimeRange(event) }} · {{ event.attendees?.length || 0 }} attending</p>
         </div>
         <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
       </article>

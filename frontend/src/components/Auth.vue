@@ -72,10 +72,8 @@ const register = async () => {
           type="button"
           class="btn btn-ghost guest-btn"
           @click="async () => {
-            const response = await auth.register('guest', 'test12345678');
-            if (!response.result) {
-              await auth.login('guest', 'test12345678');
-            }
+            const response = await auth.continueAsGuest();
+            errorMsg.value = (!response.result) ? response.msg : '';
           }"
         >
           Continue as guest

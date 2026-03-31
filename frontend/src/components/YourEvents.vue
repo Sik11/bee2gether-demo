@@ -7,7 +7,7 @@ import { getEvents, updateSavedEvents, updateUserEvents } from '../store/events.
 import { auth } from '../store/auth';
 import { userLocation } from '../store/userLocation';
 import heartBackground from '../assets/heart-background.png';
-import { formatDistanceLabel, formatEventDate } from '../utils/eventMeta';
+import { formatDistanceLabel, formatEventDate, formatEventDay, formatEventTimeRange, parseEventDate, toLocalDateKey } from '../utils/eventMeta';
 import { getScheduleExportUrl } from '../api';
 
 const title = "Your Events";
@@ -35,27 +35,19 @@ const planningEvents = computed(() => {
       seen.set(event.id, event);
     }
   }
-  return [...seen.values()].sort((a, b) => new Date(a.time) - new Date(b.time));
+  return [...seen.values()].sort((a, b) => (parseEventDate(a)?.getTime() || 0) - (parseEventDate(b)?.getTime() || 0));
 });
 
 const agendaGroups = computed(() => {
   const groups = new Map();
   for (const event of planningEvents.value) {
-    const key = formatEventDate(event.time);
+    const key = formatEventDay(event);
     const current = groups.get(key) || [];
     current.push(event);
     groups.set(key, current);
   }
   return [...groups.entries()];
 });
-
-function toLocalDateKey(dateLike) {
-  const date = new Date(dateLike);
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 const monthGrid = computed(() => {
   const today = new Date();
@@ -68,7 +60,7 @@ const monthGrid = computed(() => {
     day.setDate(firstDay.getDate() + index);
     const key = toLocalDateKey(day);
     const eventsForDay = planningEvents.value.filter((event) => {
-      return toLocalDateKey(event.time) === key;
+      return toLocalDateKey(event) === key;
     });
     return {
       key,
@@ -154,10 +146,10 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
               <span class="event-badge">{{ ownedEventIds.has(event.id) ? 'Owned' : 'Joined' }}</span>
               <span class="event-badge">{{ event.groupId ? 'Group event' : 'Open event' }}</span>
             </div>
-            <p class="event-date">{{ formatEventDate(event.time) }}</p>
+            <p class="event-date">{{ formatEventDate(event) }}</p>
             <h3 class="event-name">{{ event.name }}</h3>
             <p class="event-description">{{ event.description || 'No description yet.' }}</p>
-            <p class="event-meta">{{ event.attendees?.length || 0 }} attending · {{ formatDistanceLabel(userLocation.location, event) }}</p>
+            <p class="event-meta">{{ formatEventTimeRange(event) }} · {{ event.attendees?.length || 0 }} attending · {{ formatDistanceLabel(userLocation.location, event) }}</p>
           </div>
           <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
         </article>
@@ -183,9 +175,10 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
               <span class="event-badge">Saved</span>
               <span class="event-badge">{{ event.groupId ? 'Group event' : 'Open event' }}</span>
             </div>
-            <p class="event-date">{{ formatEventDate(event.time) }}</p>
+            <p class="event-date">{{ formatEventDate(event) }}</p>
             <h3 class="event-name">{{ event.name }}</h3>
             <p class="event-description">{{ event.description || 'No description yet.' }}</p>
+            <p class="event-meta">{{ formatEventTimeRange(event) }}</p>
           </div>
           <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
         </article>
@@ -206,9 +199,9 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
           <h3>{{ label }}</h3>
           <article v-for="event in agendaEvents" :key="event.id" class="agenda-item">
             <div>
-              <p class="event-date">{{ formatEventDate(event.time) }}</p>
+              <p class="event-date">{{ formatEventDate(event) }}</p>
               <h4>{{ event.name }}</h4>
-              <p class="section-copy">{{ event.attendees?.length || 0 }} attending · {{ event.groupId ? 'Group event' : 'Open event' }}</p>
+              <p class="section-copy">{{ formatEventTimeRange(event) }} · {{ event.attendees?.length || 0 }} attending · {{ event.groupId ? 'Group event' : 'Open event' }}</p>
             </div>
             <button type="button" class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">Open</button>
           </article>
@@ -394,6 +387,9 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
   padding-inline: 1.35rem;
   border-radius: var(--radius-pill);
   align-self: center;
+  width: fit-content;
+  min-width: 7.75rem;
+  flex: 0 0 auto;
 }
 
 .month-grid {
@@ -407,18 +403,18 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
   padding: 0.65rem;
   border-radius: var(--radius-md);
   background: var(--surface-strong);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   display: grid;
   align-content: start;
   gap: 0.45rem;
 }
 
 .month-cell.today {
-  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 76%, transparent), transparent 58%),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 22%, transparent), transparent 62%),
     var(--surface-strong);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
 }
 
 .month-cell.muted {

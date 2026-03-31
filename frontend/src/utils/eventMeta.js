@@ -1,11 +1,22 @@
-export function formatEventDate(value) {
-  if (!value) {
-    return "Date pending";
+export function parseEventDate(value) {
+  const raw = typeof value === "object" && value !== null
+    ? value.startTime || value.time
+    : value;
+  if (!raw) {
+    return null;
   }
 
-  const date = new Date(value);
+  const date = new Date(raw);
   if (Number.isNaN(date.getTime())) {
-    return String(value);
+    return null;
+  }
+  return date;
+}
+
+export function formatEventDate(value) {
+  const date = parseEventDate(value);
+  if (!date) {
+    return typeof value === "string" ? String(value) : "Date pending";
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -15,6 +26,55 @@ export function formatEventDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+export function formatEventTimeRange(event) {
+  const start = parseEventDate(event);
+  if (!start) {
+    return "Time pending";
+  }
+
+  const end = parseEventDate(event?.endTime);
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (!end) {
+    return formatter.format(start);
+  }
+  return `${formatter.format(start)} - ${formatter.format(end)}`;
+}
+
+export function formatEventDay(event) {
+  const start = parseEventDate(event);
+  if (!start) {
+    return "Date pending";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(start);
+}
+
+export function formatEventDateWithRange(event) {
+  const start = parseEventDate(event);
+  if (!start) {
+    return "Date pending";
+  }
+
+  return `${formatEventDay(event)} · ${formatEventTimeRange(event)}`;
+}
+
+export function toLocalDateKey(value) {
+  const date = parseEventDate(value);
+  if (!date) {
+    return "";
+  }
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function calculateDistanceMiles(origin, target) {

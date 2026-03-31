@@ -1,7 +1,8 @@
 import { reactive } from "vue";
-import { createUser, loginUser } from "../api";
+import { continueAsGuest as continueAsGuestAPI, createUser, loginUser } from "../api";
 
 const STORAGE_KEY = "bee2gether.auth";
+const GUEST_STORAGE_KEY = "bee2gether.guestSession";
 
 function loadStoredAuth() {
   if (typeof window === "undefined") {
@@ -50,6 +51,25 @@ function clearAuthState() {
   }
 }
 
+function getGuestSessionId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const existing = window.localStorage.getItem(GUEST_STORAGE_KEY);
+    if (existing) {
+      return existing;
+    }
+    const nextId = window.crypto?.randomUUID?.() || `guest-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    window.localStorage.setItem(GUEST_STORAGE_KEY, nextId);
+    return nextId;
+  } catch (error) {
+    console.warn("Failed to get guest session id", error);
+  }
+  return null;
+}
+
 const initialState = {
   user: {
     username: 'PLEASELOGIN'
@@ -75,7 +95,7 @@ export const auth = reactive({
     try {
       const { result, msg, userId } = await createUser(username, password);
       if (result && userId) {
-        auth.user = { username, userId };
+        auth.user = { username, userId, isGuest: false };
         auth.isLoggedIn = true;
         persistAuthState(auth);
         return { result, msg };
@@ -97,13 +117,34 @@ export const auth = reactive({
     try {
       const { result, msg, userId } = await loginUser(username, password);
       if (result && userId) {
-        auth.user = { username, userId };
+        auth.user = { username, userId, isGuest: false };
         auth.isLoggedIn = true;
         persistAuthState(auth);
         return { result, msg };
       } else {
         return { result: false, msg: msg || 'Login failed' };
       }
+    } catch (err) {
+      console.error(err);
+      return { result: false, msg: err.message };
+    }
+  },
+
+  async continueAsGuest() {
+    try {
+      const guestSessionId = getGuestSessionId();
+      if (!guestSessionId) {
+        return { result: false, msg: "Guest session unavailable" };
+      }
+
+      const { result, msg, userId, username, isGuest } = await continueAsGuestAPI(guestSessionId);
+      if (result && userId && username) {
+        auth.user = { username, userId, isGuest: Boolean(isGuest), guestSessionId };
+        auth.isLoggedIn = true;
+        persistAuthState(auth);
+        return { result, msg };
+      }
+      return { result: false, msg: msg || "Guest login failed" };
     } catch (err) {
       console.error(err);
       return { result: false, msg: err.message };
