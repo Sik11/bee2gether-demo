@@ -146,7 +146,6 @@ let hasCenteredOnUser = false;
 let hasLoadedInitialEvents = false;
 let buildingLayerSpec = null;
 const isThreeDimensional = ref(false);
-
 function createUserMarkerElement() {
   const marker = document.createElement("div");
   marker.className = "user-location-marker";
@@ -176,6 +175,28 @@ function updateUserMarkerScale() {
 
 function currentThemeConfig() {
   return settings.isDarkMode ? darkBeeTheme : lightBeeTheme;
+}
+
+function createTransparentFallbackImage() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 2;
+  const context = canvas.getContext("2d");
+  return context?.getImageData(0, 0, 2, 2) ?? new ImageData(2, 2);
+}
+
+function installStyleImageFallbacks() {
+  if (!mapInstance) {
+    return;
+  }
+
+  mapInstance.on("styleimagemissing", (event) => {
+    const id = event?.id;
+    if (!id || mapInstance.hasImage(id)) {
+      return;
+    }
+    mapInstance.addImage(id, createTransparentFallbackImage(), { pixelRatio: 2 });
+  });
 }
 
 function buildFeatureCollection() {
@@ -402,14 +423,14 @@ function ensureThreeDimensionalBuildings() {
       "fill-extrusion-color": settings.isDarkMode ? "#d8d8d2" : "#efe6d4",
       "fill-extrusion-height": [
         "coalesce",
-        ["get", "render_height"],
-        ["get", "height"],
+        ["to-number", ["get", "render_height"], 8],
+        ["to-number", ["get", "height"], 8],
         8,
       ],
       "fill-extrusion-base": [
         "coalesce",
-        ["get", "render_min_height"],
-        ["get", "min_height"],
+        ["to-number", ["get", "render_min_height"], 0],
+        ["to-number", ["get", "min_height"], 0],
         0,
       ],
       "fill-extrusion-opacity": settings.isDarkMode ? 0.92 : 0.86,
@@ -601,10 +622,9 @@ function toggleThreeDimensional() {
   });
 }
 
-function initializeMap() {
+async function initializeMap() {
   const preferredCenter = getPreferredCenter();
   const center = [preferredCenter.lng, preferredCenter.lat];
-
   mapInstance = new maplibregl.Map({
     container: mapElement.value,
     style: styleUrl,
@@ -613,6 +633,7 @@ function initializeMap() {
     attributionControl: false,
   });
 
+  installStyleImageFallbacks();
   mapInstance.dragRotate.disable();
   mapInstance.touchZoomRotate.disableRotation();
 
@@ -640,7 +661,9 @@ function initializeMap() {
       if (import.meta.env.DEV && typeof window !== "undefined") {
         window.__beeMapLoadSteps.push("layers");
       }
-      ensureThreeDimensionalBuildings();
+      if (isThreeDimensional.value) {
+        ensureThreeDimensionalBuildings();
+      }
       await ensureHiveIcon();
       if (import.meta.env.DEV && typeof window !== "undefined") {
         window.__beeMapLoadSteps.push("icons");
@@ -678,7 +701,7 @@ async function onEventClicked(event) {
 }
 
 onMounted(() => {
-  initializeMap();
+  void initializeMap();
   preloadVisibleEvents(getPreferredCenter());
 });
 

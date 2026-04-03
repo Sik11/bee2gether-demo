@@ -38,6 +38,28 @@ const mapElement = ref(null);
 let mapInstance = null;
 let marker = null;
 
+function createTransparentFallbackImage() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2;
+  canvas.height = 2;
+  const context = canvas.getContext('2d');
+  return context?.getImageData(0, 0, 2, 2) ?? new ImageData(2, 2);
+}
+
+function installStyleImageFallbacks() {
+  if (!mapInstance) {
+    return;
+  }
+
+  mapInstance.on('styleimagemissing', (event) => {
+    const id = event?.id;
+    if (!id || mapInstance.hasImage(id)) {
+      return;
+    }
+    mapInstance.addImage(id, createTransparentFallbackImage(), { pixelRatio: 2 });
+  });
+}
+
 const hasCoordinates = computed(() =>
   Number.isFinite(props.coordinates?.lat) &&
   Number.isFinite(props.coordinates?.lng) &&
@@ -103,7 +125,7 @@ function syncMarker({ animate = false } = {}) {
   }
 }
 
-function initializeMap() {
+async function initializeMap() {
   if (!mapElement.value || mapInstance) {
     return;
   }
@@ -119,6 +141,8 @@ function initializeMap() {
     cooperativeGestures: false,
     interactive: true,
   });
+
+  installStyleImageFallbacks();
 
   mapInstance.on('load', () => {
     syncMarker();
@@ -173,7 +197,9 @@ watch(
   }
 );
 
-onMounted(initializeMap);
+onMounted(() => {
+  void initializeMap();
+});
 
 onBeforeUnmount(() => {
   marker?.remove();

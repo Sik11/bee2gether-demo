@@ -341,7 +341,7 @@ function toggleNotifications() {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  overflow: hidden;
+  overflow: auto;
   padding: 0.75rem 1rem 0.8rem;
   pointer-events: auto;
   background:
@@ -353,10 +353,12 @@ function toggleNotifications() {
 .overlay-card :deep(.page-wrapper) {
   width: min(100%, 46rem);
   max-height: calc(100dvh - var(--topbar-height) - 2.3rem);
-  min-height: min(42rem, calc(100dvh - var(--topbar-height) - 2.3rem));
+  min-height: 0;
   padding: 0;
   gap: 0.75rem;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
   border-radius: calc(var(--radius-lg) + 0.1rem);
   border: 1px solid color-mix(in srgb, var(--border-strong) 88%, transparent);
   background: color-mix(in srgb, var(--surface) 94%, transparent);
@@ -457,6 +459,9 @@ function toggleNotifications() {
 
   .overlay-card :deep(.page-wrapper) {
     width: 100%;
+    max-height: calc(100dvh - var(--topbar-height) - var(--bottom-nav-height) - 1.35rem);
+    min-height: 0;
+    overflow: auto;
   }
 
   .overlay-card :deep(.event-sheet) {

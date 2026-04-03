@@ -15,6 +15,11 @@ const register = async () => {
   const response = await auth.register(username.value, password.value);
   errorMsg.value = (!response.result) ? response.msg : '';
 };
+
+const continueAsGuest = async () => {
+  const response = await auth.continueAsGuest();
+  errorMsg.value = (!response.result) ? response.msg : '';
+};
 </script>
 
 <template>
@@ -71,10 +76,7 @@ const register = async () => {
         <button
           type="button"
           class="btn btn-ghost guest-btn"
-          @click="async () => {
-            const response = await auth.continueAsGuest();
-            errorMsg.value = (!response.result) ? response.msg : '';
-          }"
+          @click="continueAsGuest"
         >
           Continue as guest
         </button>

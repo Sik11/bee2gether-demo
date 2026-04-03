@@ -316,6 +316,8 @@ onMounted(loadComments);
   background: color-mix(in srgb, var(--surface) 98%, transparent);
   padding-block: 1.1rem;
   padding-inline: 1.35rem;
+  position: relative;
+  z-index: 4;
 }
 
 .event-sheet__footer--wrap {
@@ -363,6 +365,7 @@ onMounted(loadComments);
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(22rem, 0.9fr);
+  overflow: hidden;
 }
 
 .event-sheet__main,

@@ -42,6 +42,7 @@ class FastApiCompatibilityTests(unittest.TestCase):
         self.assertEqual(login_payload["msg"], "OK")
 
     def test_group_and_event_flow(self) -> None:
+        future_date = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
         user_payload = self.client.put(
             "/api/createUser",
             json={"username": "groupowner", "password": "testpassword2"},
@@ -59,7 +60,7 @@ class FastApiCompatibilityTests(unittest.TestCase):
             "/api/createEvent",
             json={
                 "name": "Picnic",
-                "time": "2026-04-01",
+                "time": future_date,
                 "long": -1.4,
                 "lat": 50.9,
                 "description": "Park meetup",
@@ -173,6 +174,7 @@ class FastApiCompatibilityTests(unittest.TestCase):
         self.assertIsNotNone(repository.get_event_by_id(fresh_payload["eventId"]))
 
     def test_comments_notifications_chat_and_export_flow(self) -> None:
+        future_date = (datetime.now(timezone.utc) + timedelta(days=5)).date().isoformat()
         owner = self.client.put(
             "/api/createUser",
             json={"username": "owneruser", "password": "testpassword4"},
@@ -198,7 +200,7 @@ class FastApiCompatibilityTests(unittest.TestCase):
             "/api/createEvent",
             json={
                 "name": "Revision Jam",
-                "time": "2026-04-05",
+                "time": future_date,
                 "long": -1.4,
                 "lat": 50.9,
                 "description": "Bring notes",

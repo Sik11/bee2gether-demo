@@ -47,16 +47,50 @@ export const groups = reactive({
     }
 });
 
+function normalizeGroup(group) {
+    if (!group) {
+        return group;
+    }
+
+    const events = Array.isArray(group.events) ? group.events : [];
+    const memberIds = Array.isArray(group.memberIds) ? group.memberIds : [];
+    const memberCount = typeof group.memberCount === 'number' ? group.memberCount : memberIds.length;
+    const upcomingEventCount = typeof group.upcomingEventCount === 'number'
+        ? group.upcomingEventCount
+        : events.length;
+
+    return {
+        ...group,
+        memberCount,
+        upcomingEventCount,
+    };
+}
+
+function normalizeGroups(collection) {
+    return Array.isArray(collection) ? collection.map(normalizeGroup) : [];
+}
+
 export async function updateUserGroups(userId){
+    if (!userId) {
+        getGroups().userGroups = [];
+        return { result: false, msg: 'UserId is required' };
+    }
     try {
         const response = await getGroupsAPI(userId);
         if (response.result) {
-            getGroups().userGroups=response.memberGroups // Replace with your actual method to update groups in your application state
+            getGroups().userGroups = normalizeGroups(response.memberGroups);
         } else {
+            if ((response.msg || '').toLowerCase().includes('user not found')) {
+                getGroups().userGroups = [];
+                await auth.recoverMissingUser();
+                return response;
+            }
             console.error(response.msg || 'Failed to get user events');
         }
+        return response;
     } catch (error) {
         console.error(error.message);
+        return { result: false, msg: error.message };
     }
 }
 
@@ -64,7 +98,7 @@ export async function updateCurrentGroup(groupId){
     try {
         const response = await getAllGroups();
         if (response.result) {
-            getGroups().currentGroup=response.groups.find(group => group.id === groupId)
+            getGroups().currentGroup = normalizeGroup(response.groups.find(group => group.id === groupId))
         } else {
             console.error(response.msg || 'Failed to get user events');
         }
@@ -78,7 +112,7 @@ export async function updateGroups() {
     try {
         const response = await getAllGroups();
         if (response.result) {
-            getGroups().availableGroups=response.groups
+            getGroups().availableGroups = normalizeGroups(response.groups);
         } else {
             console.error(response.msg || 'Failed to get user events');
         }
@@ -99,7 +133,7 @@ export function startPollingAllGroups() {
     .then((response) => {
         if (response.result) {
             // Assuming you have a function or a state to update all available groups
-            getGroups().availableGroups= response.groups  // Replace with your actual method to update groups in your application state
+            getGroups().availableGroups = normalizeGroups(response.groups);
         }
     })
     .then(() => {
@@ -115,7 +149,7 @@ export function startPollingAllGroups() {
  * 
  */
 export function startPollingUserGroups() {
-    if (!auth.isLoggedIn) {
+    if (!auth.isLoggedIn || !auth.user?.userId) {
         // Wait for 5 seconds and then call the function again
         setTimeout(startPollingUserGroups, 5000);
         return;
@@ -125,7 +159,10 @@ export function startPollingUserGroups() {
         .then((response) => {
             if (response.result) {
                 // Assuming you have a function or a state to update user-specific groups
-                getGroups().userGroups = response.memberGroups; // Replace with your actual method to update groups in your application state
+                getGroups().userGroups = normalizeGroups(response.memberGroups);
+            } else if ((response.msg || '').toLowerCase().includes('user not found')) {
+                getGroups().userGroups = [];
+                return auth.recoverMissingUser();
             }
         })
         .then(() => {

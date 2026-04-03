@@ -43,6 +43,8 @@ onMounted(async () => {
   position: absolute;
   top: 1rem;
   right: 1rem;
+  z-index: 4;
+  pointer-events: auto;
   width: min(20.5rem, calc(100vw - 2rem));
   max-height: calc(100% - 2rem);
   overflow: auto;

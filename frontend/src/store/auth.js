@@ -78,6 +78,7 @@ const initialState = {
 };
 
 const restoredState = loadStoredAuth();
+let recoveryPromise = null;
 
 /**
  * 
@@ -149,6 +150,38 @@ export const auth = reactive({
       console.error(err);
       return { result: false, msg: err.message };
     }
+  },
+
+  async recoverMissingUser() {
+    if (recoveryPromise) {
+      return recoveryPromise;
+    }
+
+    recoveryPromise = (async () => {
+      if (auth.user?.isGuest) {
+        try {
+          const guestSessionId = auth.user?.guestSessionId || getGuestSessionId();
+          if (guestSessionId) {
+            const { result, userId, username, isGuest } = await continueAsGuestAPI(guestSessionId);
+            if (result && userId && username) {
+              auth.user = { username, userId, isGuest: Boolean(isGuest), guestSessionId };
+              auth.isLoggedIn = true;
+              persistAuthState(auth);
+              return { recovered: true };
+            }
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      auth.logout();
+      return { recovered: false };
+    })().finally(() => {
+      recoveryPromise = null;
+    });
+
+    return recoveryPromise;
   },
 
   /**

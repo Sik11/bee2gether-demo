@@ -84,7 +84,7 @@ function closeSheet() {
 <style scoped lang="scss">
 .group-sheet {
   width: min(100%, 48rem);
-  height: min(38rem, calc(100dvh - var(--topbar-height) - 1.2rem));
+  height: min(41.5rem, calc(100dvh - var(--topbar-height) - 0.85rem));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -151,6 +151,7 @@ function closeSheet() {
   gap: 1rem;
   padding: 1.35rem 1.4rem 1.1rem;
   margin: 0;
+  overflow: auto;
 }
 
 .group-sheet__intro {
@@ -204,6 +205,7 @@ function closeSheet() {
   justify-content: flex-end;
   gap: 0.75rem;
   padding-top: 0.25rem;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
 }
 
 .group-sheet__footer .btn {
@@ -219,7 +221,7 @@ function closeSheet() {
 @media (max-width: 720px) {
   .group-sheet {
     width: min(100%, calc(100% - 0.8rem));
-    height: min(38rem, calc(100dvh - var(--topbar-height) - 0.45rem));
+    height: min(41.5rem, calc(100dvh - var(--topbar-height) - 0.45rem));
     border-radius: 1.25rem;
   }
 

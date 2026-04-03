@@ -411,10 +411,8 @@ const canExportSchedule = computed(() => Boolean(auth.user?.userId));
 
 .month-cell.today {
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 22%, transparent), transparent 62%),
-    var(--surface-strong);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+  background: color-mix(in srgb, var(--accent-soft) 10%, var(--surface-strong));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .month-cell.muted {

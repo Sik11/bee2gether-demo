@@ -12,6 +12,11 @@ import Avatar from './helper/Avatar.vue';
 
 const router = useRouter();
 
+const accountId = computed(() => {
+  const userId = auth.user?.userId;
+  return userId ? `#${userId.substring(0, 6)}` : '#guest';
+});
+
 const locationStatus = computed(() => {
   const { lat, lng } = userLocation.location;
   if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
@@ -23,6 +28,11 @@ const locationStatus = computed(() => {
 function openNotifications() {
   router.replace({ query: { ...router.currentRoute.value.query, notifications: '1' } });
 }
+
+function logout() {
+  auth.logout();
+  router.replace('/auth');
+}
 </script>
 
 <template>
@@ -33,7 +43,7 @@ function openNotifications() {
         <div class="hero-copy">
           <p class="eyebrow">Profile</p>
           <h2>{{ auth.user.username }}</h2>
-          <p class="account-id">#{{ auth.user.userId.substring(0, 6) }}</p>
+          <p class="account-id">{{ accountId }}</p>
           <p class="section-copy">
             Keep your preferences light and your plans close. This is the fastest way back into discovery.
           </p>
@@ -41,7 +51,7 @@ function openNotifications() {
       </div>
       <div class="hero-actions">
         <button type="button" class="btn btn-secondary" @click="openNotifications">Open notifications</button>
-        <button type="button" class="btn btn-danger" @click="() => auth.logout()">Logout</button>
+        <button type="button" class="btn btn-danger" @click="logout">Logout</button>
       </div>
     </section>
 

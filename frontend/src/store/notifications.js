@@ -21,6 +21,10 @@ export async function refreshNotifications() {
     if (response.result) {
       notifications.items = response.notifications || [];
       notifications.unreadCount = response.unreadCount || 0;
+    } else if ((response.msg || '').toLowerCase().includes('user not found')) {
+      notifications.items = [];
+      notifications.unreadCount = 0;
+      await auth.recoverMissingUser();
     }
   } catch (error) {
     console.error(error);

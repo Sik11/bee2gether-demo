@@ -287,5 +287,16 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .overview-btn {
+    flex: 0 0 auto;
+    min-height: 3.15rem;
+  }
+
+  .chat-head,
+  .chat-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

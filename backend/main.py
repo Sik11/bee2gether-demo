@@ -61,7 +61,20 @@ def _event_response(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _group_response(group: dict[str, Any]) -> dict[str, Any]:
-    return deepcopy(group)
+    payload = deepcopy(group)
+    member_ids = payload.get("memberIds")
+    if not isinstance(member_ids, list) or not member_ids:
+        group_id = str(payload.get("id", ""))
+        member_ids = [
+            user["id"]
+            for user in repository.list_users()
+            if group_id and group_id in user.get("groupsMember", [])
+        ]
+        payload["memberIds"] = member_ids
+
+    payload["memberCount"] = len(member_ids)
+    payload["upcomingEventCount"] = len(payload.get("events", []))
+    return payload
 
 
 def _now_iso() -> str:

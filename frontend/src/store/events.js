@@ -209,13 +209,22 @@ export async function updateUserEvents(userId) {
 }
 
 export async function updateSavedEvents(userId) {
+  if (!userId) {
+    events.savedEvents = [];
+    return { result: false, msg: 'UserId is required' };
+  }
   try {
     const response = await getSavedEventsApi(userId);
     if (response.result) {
       events.savedEvents = response.savedEvents || [];
+    } else if ((response.msg || '').toLowerCase().includes('user not found')) {
+      events.savedEvents = [];
+      await auth.recoverMissingUser();
     }
+    return response;
   } catch (error) {
     console.error(error.message);
+    return { result: false, msg: error.message };
   }
 }
 
