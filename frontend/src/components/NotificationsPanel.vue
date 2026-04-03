@@ -1,7 +1,9 @@
 <script setup>
-import { onMounted } from 'vue';
+import { computed, onMounted } from 'vue';
 import { markAllNotificationsRead, notifications, refreshNotifications } from '../store/notifications';
 import { updateQueryState } from '../store/urlState';
+
+const visibleNotifications = computed(() => notifications.items.slice(0, 10));
 
 function closePanel() {
   updateQueryState({ notifications: null });
@@ -29,10 +31,10 @@ onMounted(async () => {
     </div>
 
     <div v-else class="list">
-      <article v-for="item in notifications.items" :key="item.id" class="notification-card">
+      <article v-for="item in visibleNotifications" :key="item.id" class="notification-card">
         <p class="notification-type">{{ item.type.replace('-', ' ') }}</p>
         <h3>{{ item.title }}</h3>
-        <p>{{ item.body }}</p>
+        <p class="notification-body">{{ item.body }}</p>
       </article>
     </div>
   </aside>
@@ -62,16 +64,18 @@ onMounted(async () => {
 .panel-head h2 {
   margin: 0.35rem 0 0;
   font-family: var(--font-display);
+  font-size: clamp(1.9rem, 3.4vw, 2.4rem);
+  line-height: 0.95;
 }
 
 .list {
   display: grid;
-  gap: 0.8rem;
+  gap: 0.75rem;
   margin-top: 1rem;
 }
 
 .notification-card {
-  padding: 0.9rem 1rem;
+  padding: 0.85rem 0.95rem;
   border-radius: var(--radius-md);
   background: var(--surface-strong);
   border: 1px solid var(--border);
@@ -83,14 +87,24 @@ onMounted(async () => {
 }
 
 .notification-card h3 {
-  margin-top: 0.3rem;
+  margin-top: 0.22rem;
+  font-size: 0.98rem;
+  line-height: 1.15;
+  font-weight: 800;
 }
 
 .notification-type {
   color: var(--ink-muted);
   text-transform: uppercase;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   letter-spacing: 0.05em;
+}
+
+.notification-body {
+  margin-top: 0.18rem !important;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
 }
 
 .empty {

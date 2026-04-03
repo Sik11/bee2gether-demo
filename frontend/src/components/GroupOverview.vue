@@ -40,6 +40,27 @@ const chatBody = ref('');
 let removeRealtimeListener = null;
 let subscribedChannel = null;
 
+const chatFeed = computed(() => [...chatMessages.value].sort((a, b) => (
+  new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+)));
+
+function isOwnMessage(message) {
+  return message?.userId === auth.user?.userId;
+}
+
+function formatChatTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toLocaleString(undefined, {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function createGroupEvent() {
   groups.currentGroupIdForEvents = groups.currentGroup.id;
   pages.addLayer('create-event');
@@ -132,8 +153,16 @@ onUnmounted(() => {
       <p class="section-copy">Create the first shared plan for this group and it will appear here.</p>
     </div>
 
-    <div v-else class="events-container">
-      <article v-for="event in groupEvents" :key="event.id" class="event-card soft-panel">
+    <section v-else class="events-panel soft-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Upcoming plans</p>
+          <h3>What the group is doing next</h3>
+        </div>
+        <span class="section-count">{{ groupEvents.length }} event<span v-if="groupEvents.length !== 1">s</span></span>
+      </div>
+      <div class="events-container">
+      <article v-for="event in groupEvents" :key="event.id" class="event-card">
         <div class="event-image">
           <img :src="event['eventImg(s)'][0] || heartBackground" alt="Event image" />
         </div>
@@ -142,9 +171,10 @@ onUnmounted(() => {
           <h3 class="event-name">{{ event.name }}</h3>
           <p class="event-description">{{ formatEventTimeRange(event) }} · {{ event.attendees?.length || 0 }} attending</p>
         </div>
-        <button class="btn btn-secondary more-info-btn" @click="clickedEvent(event)">View details</button>
+        <button class="btn btn-secondary detail-btn" @click="clickedEvent(event)">View details</button>
       </article>
-    </div>
+      </div>
+    </section>
 
     <section v-if="isGroupJoined" class="chat-panel soft-panel">
       <div class="chat-head">
@@ -152,13 +182,17 @@ onUnmounted(() => {
           <p class="eyebrow">Group chat</p>
           <h3>Talk to the hive</h3>
         </div>
-        <button type="button" class="btn btn-secondary" @click="refreshChat">Reload history</button>
+        <button type="button" class="btn btn-secondary chat-action-btn" @click="refreshChat">Reload history</button>
       </div>
-      <div v-if="chatMessages.length" class="chat-list">
-        <article v-for="message in chatMessages" :key="message.id" class="chat-message">
+      <div v-if="chatFeed.length" class="chat-list">
+        <article
+          v-for="message in chatFeed"
+          :key="message.id"
+          :class="['chat-message', { 'chat-message--own': isOwnMessage(message) }]"
+        >
           <div class="chat-meta">
             <strong>{{ message.username }}</strong>
-            <span>{{ new Date(message.createdAt).toLocaleString() }}</span>
+            <span>{{ formatChatTimestamp(message.createdAt) }}</span>
           </div>
           <p>{{ message.body }}</p>
         </article>
@@ -207,23 +241,65 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+  padding-inline: 0.35rem;
+  align-items: stretch;
 }
 
 .overview-btn {
   flex: 1 1 12rem;
+  min-height: 3.35rem;
+  padding-inline: 1.35rem;
+  justify-content: center;
+}
+
+.events-panel,
+.chat-panel,
+.empty-state {
+  padding: 1.25rem;
+  border-radius: var(--radius-lg);
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.section-head h3 {
+  margin: 0.28rem 0 0;
+  font-family: var(--font-display);
+  font-size: 1.28rem;
+}
+
+.section-count {
+  padding: 0.45rem 0.78rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-muted) 84%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .events-container {
   display: grid;
-  gap: 1rem;
+  gap: 0;
 }
 
 .event-card {
-  border-radius: var(--radius-lg);
-  padding: 1rem;
+  padding: 1rem 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.event-card:first-child {
+  border-top: 0;
+  padding-top: 0.2rem;
 }
 
 .event-image {
@@ -261,16 +337,17 @@ onUnmounted(() => {
   color: var(--ink-soft);
 }
 
-.empty-state {
-  padding: 1.35rem;
-  border-radius: var(--radius-lg);
+.detail-btn {
+  min-height: 3.15rem;
+  min-width: 8.25rem;
+  padding-inline: 1.2rem;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .chat-panel {
   display: grid;
   gap: 1rem;
-  padding: 1rem;
-  border-radius: var(--radius-lg);
 }
 
 .chat-head,
@@ -285,30 +362,74 @@ onUnmounted(() => {
   font-family: var(--font-display);
 }
 
+.chat-action-btn {
+  min-height: 3.15rem;
+  padding-inline: 1.3rem;
+  border-radius: var(--radius-pill);
+  align-self: center;
+  flex: 0 0 auto;
+}
+
 .chat-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
+  padding: 0.85rem;
+  border-radius: calc(var(--radius-lg) - 8px);
+  background: color-mix(in srgb, var(--surface-muted) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  max-height: 18rem;
+  overflow: auto;
 }
 
 .chat-message {
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius-md);
+  max-width: min(34rem, 84%);
+  padding: 0.82rem 0.95rem;
+  border-radius: 1.15rem;
   background: var(--surface-strong);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  justify-self: start;
+}
+
+.chat-message--own {
+  justify-self: end;
+  background: color-mix(in srgb, var(--accent-soft) 48%, var(--surface-strong));
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
 }
 
 .chat-message p {
-  margin: 0.45rem 0 0;
+  margin: 0.22rem 0 0;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.chat-meta {
+  align-items: baseline;
+}
+
+.chat-meta strong {
+  font-size: 0.92rem;
 }
 
 .chat-meta span {
   color: var(--ink-muted);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
 }
 
 .chat-compose {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.85rem;
+  padding: 0.85rem;
+  border-radius: calc(var(--radius-lg) - 8px);
+  background: color-mix(in srgb, var(--surface-muted) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.chat-compose .btn {
+  justify-self: end;
+  min-height: 3.15rem;
+  padding-inline: 1.3rem;
+  border-radius: var(--radius-pill);
 }
 
 @media (max-width: 720px) {
@@ -324,9 +445,37 @@ onUnmounted(() => {
   }
 
   .chat-head,
-  .chat-meta {
+  .chat-meta,
+  .section-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .action-row {
+    padding-inline: 0;
+  }
+
+  .chat-panel {
+    padding: 1rem;
+  }
+
+  .chat-list,
+  .chat-compose {
+    padding: 0.75rem;
+  }
+
+  .detail-btn,
+  .chat-action-btn {
+    width: 100%;
+  }
+
+  .chat-message {
+    max-width: 100%;
+  }
+
+  .chat-compose .btn {
+    width: 100%;
+    justify-self: stretch;
   }
 }
 </style>

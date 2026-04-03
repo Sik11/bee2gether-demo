@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from copy import deepcopy
 from datetime import date, datetime, time, timedelta, timezone
@@ -190,13 +191,8 @@ def _append_notification(
     event_id: str | None = None,
     group_id: str | None = None,
 ) -> None:
-    user = repository.get_user_by_id(user_id)
-    if user is None:
-        return
-
-    user.setdefault("notifications", [])
-    user["notifications"].insert(
-        0,
+    repository.append_user_notification(
+        user_id,
         {
             "id": str(uuid4()),
             "type": notification_type,
@@ -210,8 +206,6 @@ def _append_notification(
             "groupId": group_id,
         },
     )
-    user["notifications"] = user["notifications"][:75]
-    repository.update_user(user)
 
 
 def _comment_response(comment: dict[str, Any]) -> dict[str, Any]:
@@ -227,10 +221,10 @@ def _notification_response(notification: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _emit_notifications_state(user_id: str) -> None:
-    user = repository.get_user_by_id(user_id)
-    if user is None:
+    user_payload = repository.get_user_fields(user_id, ["notifications"])
+    if user_payload is None:
         return
-    notifications = [_notification_response(item) for item in user.get("notifications", [])]
+    notifications = [_notification_response(item) for item in user_payload.get("notifications", [])]
     await realtime_manager.emit_to_user(
         user_id,
         {
@@ -240,6 +234,17 @@ async def _emit_notifications_state(user_id: str) -> None:
             "unreadCount": sum(1 for item in notifications if not item.get("read")),
         },
     )
+
+
+async def _emit_notifications_state_many(user_ids: list[str]) -> None:
+    await asyncio.gather(*(_emit_notifications_state(user_id) for user_id in user_ids))
+
+
+def _schedule_notifications_refresh(user_ids: list[str] | set[str] | tuple[str, ...]) -> None:
+    unique_user_ids = [user_id for user_id in dict.fromkeys(str(user_id) for user_id in user_ids if user_id)]
+    if not unique_user_ids:
+        return
+    asyncio.create_task(_emit_notifications_state_many(unique_user_ids))
 
 
 def _attendees_payload(event: dict[str, Any]) -> dict[str, Any]:
@@ -365,6 +370,15 @@ def _lookup_user(payload: dict[str, Any]) -> dict[str, Any] | None:
         return repository.get_user_by_username(payload["username"])
     if payload.get("guestSessionId"):
         return repository.get_user_by_guest_session(str(payload["guestSessionId"]))
+    return None
+
+
+def _lookup_user_id(payload: dict[str, Any]) -> str | None:
+    if payload.get("userId"):
+        return str(payload["userId"])
+    user = _lookup_user(payload)
+    if user:
+        return str(user["id"])
     return None
 
 
@@ -839,7 +853,7 @@ async def join_group(request: Request) -> JSONResponse:
             actor_username=user["username"],
             group_id=str(group_id),
         )
-        await _emit_notifications_state(owner["id"])
+        _schedule_notifications_refresh([owner["id"]])
     await _emit_group_updated(group, affected_user_ids=[user["id"], group["userId"]])
     return JSONResponse({"result": True, "msg": "Joined group successfully"})
 
@@ -850,22 +864,21 @@ async def get_all_user_groups(request: Request) -> JSONResponse:
     if not payload.get("userId") and not payload.get("username"):
         return _json_error("Username or UserId is required", 400)
 
-    user = _lookup_user(payload)
-    if user is None:
+    user_id = _lookup_user_id(payload)
+    if user_id is None:
         return _json_error("User not found.", 400)
+    user_fields = repository.get_user_fields(user_id, ["groupsMember"]) or {}
 
     groups = []
-    for group_id in user.get("groupsMember", []):
-        group = repository.get_group_by_id(group_id)
-        if group:
-            group_payload = _group_response(group)
-            group_payload["events"] = [_event_response(event) for event in group_payload.get("events", [])]
-            groups.append(group_payload)
+    for group in repository.list_groups_by_ids(list(user_fields.get("groupsMember", []))):
+        group_payload = _group_response(group)
+        group_payload["events"] = [_event_response(event) for event in group_payload.get("events", [])]
+        groups.append(group_payload)
 
     offset, limit = _pagination_from_mapping(payload)
     groups, total = _slice_items(groups, offset, limit)
 
-    return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "memberGroups": groups, "total": total, "offset": offset, "limit": limit})
+    return JSONResponse({"result": True, "msg": "OK", "userId": user_id, "memberGroups": groups, "total": total, "offset": offset, "limit": limit})
 
 
 @api_router.api_route("/createEvent", methods=["PUT"])
@@ -942,14 +955,15 @@ async def get_map_events(request: Request) -> JSONResponse:
         return _json_error(str(error.detail), 500)
 
     events = []
-    for event in repository.list_events():
+    for event in repository.list_events_in_bounds(
+        bottom_left_long,
+        upper_right_long,
+        bottom_left_lat,
+        upper_right_lat,
+    ):
         if _event_status(event) == "ended":
             continue
-        if (
-            bottom_left_long <= float(event.get("long", 0)) <= upper_right_long
-            and bottom_left_lat <= float(event.get("lat", 0)) <= upper_right_lat
-        ):
-            events.append(_event_response(event))
+        events.append(_event_response(event))
     return JSONResponse({"result": True, "events": events})
 
 
@@ -1007,7 +1021,7 @@ async def add_attending_event(request: Request) -> JSONResponse:
                 event_id=event_id,
                 group_id=event.get("groupId"),
             )
-            await _emit_notifications_state(event["userId"])
+            _schedule_notifications_refresh([event["userId"]])
 
     await _emit_event_attendance_update(event)
 
@@ -1051,15 +1065,12 @@ async def get_attending_events(request: Request) -> JSONResponse:
     if not payload.get("userId") and not payload.get("username"):
         return _json_error("Username or UserId is required", 400)
 
-    user = _lookup_user(payload)
-    if user is None:
+    user_id = _lookup_user_id(payload)
+    if user_id is None:
         return _json_error("User not found.", 400)
+    user_fields = repository.get_user_fields(user_id, ["eventsAttending"]) or {}
 
-    attending_events = []
-    for event_id in user.get("eventsAttending", []):
-        event = repository.get_event_by_id(event_id)
-        if event:
-            attending_events.append(_event_response(event))
+    attending_events = [_event_response(event) for event in repository.list_events_by_ids(list(user_fields.get("eventsAttending", [])))]
 
     offset, limit = _pagination_from_mapping(payload)
     paged_events, total = _slice_items(attending_events, offset, limit)
@@ -1068,7 +1079,7 @@ async def get_attending_events(request: Request) -> JSONResponse:
         {
             "result": True,
             "msg": "OK",
-            "userId": user["id"],
+            "userId": user_id,
             "attendingEvents": paged_events,
             "total": total,
             "offset": offset,
@@ -1084,14 +1095,14 @@ async def get_saved_events(request: Request) -> JSONResponse:
     if not payload.get("userId") and not payload.get("username"):
         return _json_error("Username or UserId is required", 400)
 
-    user = _lookup_user(payload)
-    if user is None:
+    user_id = _lookup_user_id(payload)
+    if user_id is None:
         return _json_error("User not found.", 400)
+    user_fields = repository.get_user_fields(user_id, ["savedEvents"]) or {}
 
     saved_events = []
-    for event_id in user.get("savedEvents", []):
-        event = repository.get_event_by_id(event_id)
-        if event and _event_status(event) != "ended":
+    for event in repository.list_events_by_ids(list(user_fields.get("savedEvents", []))):
+        if _event_status(event) != "ended":
             saved_events.append(_event_response(event))
 
     offset, limit = _pagination_from_mapping(payload)
@@ -1101,7 +1112,7 @@ async def get_saved_events(request: Request) -> JSONResponse:
         {
             "result": True,
             "msg": "OK",
-            "userId": user["id"],
+            "userId": user_id,
             "savedEvents": paged_events,
             "total": total,
             "offset": offset,
@@ -1117,9 +1128,10 @@ async def get_planning_events(request: Request) -> JSONResponse:
     if not payload.get("userId") and not payload.get("username"):
         return _json_error("Username or UserId is required", 400)
 
-    user = _lookup_user(payload)
-    if user is None:
+    user_id = _lookup_user_id(payload)
+    if user_id is None:
         return _json_error("User not found.", 400)
+    user_fields = repository.get_user_fields(user_id, ["eventsAttending", "savedEvents"]) or {}
 
     month = str(payload.get("month", "")).strip()
     month_start: datetime | None = None
@@ -1132,8 +1144,7 @@ async def get_planning_events(request: Request) -> JSONResponse:
             return _json_error("month must be in YYYY-MM format", 400)
 
     merged: dict[str, dict[str, Any]] = {}
-    for event_id in [*user.get("eventsAttending", []), *user.get("savedEvents", [])]:
-        event = repository.get_event_by_id(event_id)
+    for event in repository.list_events_by_ids([*user_fields.get("eventsAttending", []), *user_fields.get("savedEvents", [])]):
         if not event or _event_status(event) == "ended":
             continue
         event_dt = _event_datetime(event.get("startTime") or event.get("time"))
@@ -1151,7 +1162,7 @@ async def get_planning_events(request: Request) -> JSONResponse:
         {
             "result": True,
             "msg": "OK",
-            "userId": user["id"],
+            "userId": user_id,
             "events": paged_events,
             "total": total,
             "offset": offset,
@@ -1164,12 +1175,12 @@ async def get_planning_events(request: Request) -> JSONResponse:
 @api_router.api_route("/getNotifications", methods=["POST"])
 async def get_notifications(request: Request) -> JSONResponse:
     payload = await request.json()
-    try:
-        user = _require_user(payload)
-    except HTTPException as error:
-        return _json_error(str(error.detail), error.status_code)
+    user_id = _lookup_user_id(payload)
+    if user_id is None:
+        return _json_error("User not found.", 400)
 
-    notifications = [_notification_response(item) for item in user.get("notifications", [])]
+    user_payload = repository.get_user_fields(user_id, ["notifications"]) or {}
+    notifications = [_notification_response(item) for item in user_payload.get("notifications", [])]
     return JSONResponse(
         {
             "result": True,
@@ -1194,7 +1205,7 @@ async def mark_notifications_read(request: Request) -> JSONResponse:
         if mark_all or notification.get("id") in notification_ids:
             notification["read"] = True
     repository.update_user(user)
-    await _emit_notifications_state(user["id"])
+    _schedule_notifications_refresh([user["id"]])
     return JSONResponse({"result": True, "msg": "Notifications updated"})
 
 
@@ -1303,7 +1314,7 @@ async def add_event_comment(request: Request) -> JSONResponse:
             event_id=event_id,
             group_id=event.get("groupId"),
         )
-        await _emit_notifications_state(event["userId"])
+        _schedule_notifications_refresh([event["userId"]])
     await _emit_event_comment_created(event, comment)
     return JSONResponse({"result": True, "comment": _comment_response(comment)})
 
@@ -1399,10 +1410,7 @@ async def get_all_user_group_events(request: Request) -> JSONResponse:
 
     seen: set[str] = set()
     all_events: list[dict[str, Any]] = []
-    for group_id in user.get("groupsMember", []):
-        group = repository.get_group_by_id(group_id)
-        if not group:
-            continue
+    for group in repository.list_groups_by_ids(list(user.get("groupsMember", []))):
         for event in group.get("events", []):
             event_id = event.get("id")
             if event_id and event_id not in seen:
@@ -1420,14 +1428,16 @@ async def get_group_chat_messages(request: Request) -> JSONResponse:
         return _json_error("GroupId is required", 400)
     try:
         user = _require_user(payload)
-        group = _require_group(group_id)
     except HTTPException as error:
         return _json_error(str(error.detail), error.status_code)
+    group_fields = repository.get_group_fields(group_id, ["userId", "messages"])
+    if group_fields is None:
+        return _json_error("Group not found", 404)
 
-    if group_id not in user.get("groupsMember", []) and group.get("userId") != user["id"]:
+    if group_id not in user.get("groupsMember", []) and group_fields.get("userId") != user["id"]:
         return _json_error("User is not a member of the group", 403)
 
-    messages = [_message_response(item) for item in group.get("messages", [])]
+    messages = [_message_response(item) for item in group_fields.get("messages", [])]
     return JSONResponse({"result": True, "messages": messages})
 
 
@@ -1440,11 +1450,13 @@ async def send_group_chat_message(request: Request) -> JSONResponse:
         return _json_error("GroupId and body are required", 400)
     try:
         user = _require_user(payload)
-        group = _require_group(group_id)
     except HTTPException as error:
         return _json_error(str(error.detail), error.status_code)
+    group_fields = repository.get_group_fields(group_id, ["name", "userId"])
+    if group_fields is None:
+        return _json_error("Group not found", 404)
 
-    if group_id not in user.get("groupsMember", []) and group.get("userId") != user["id"]:
+    if group_id not in user.get("groupsMember", []) and group_fields.get("userId") != user["id"]:
         return _json_error("User is not a member of the group", 403)
 
     message = {
@@ -1454,24 +1466,24 @@ async def send_group_chat_message(request: Request) -> JSONResponse:
         "body": body,
         "createdAt": _now_iso(),
     }
-    group.setdefault("messages", []).append(message)
-    group["messages"] = group["messages"][-100:]
-    repository.update_group(group)
+    repository.append_group_message(group_id, message)
 
-    for recipient in repository.list_users():
-        if recipient["id"] == user["id"]:
-            continue
-        if group_id in recipient.get("groupsMember", []):
-            _append_notification(
-                recipient["id"],
-                notification_type="group-chat",
-                title=f"New message in {group['name']}",
-                body=f"{user['username']}: {body[:72]}",
-                actor_id=user["id"],
-                actor_username=user["username"],
-                group_id=group_id,
-            )
-            await _emit_notifications_state(recipient["id"])
+    recipient_ids = [
+        recipient_id
+        for recipient_id in repository.list_user_ids_for_group(group_id)
+        if recipient_id != user["id"]
+    ]
+    for recipient_id in recipient_ids:
+        _append_notification(
+            recipient_id,
+            notification_type="group-chat",
+            title=f"New message in {group_fields['name']}",
+            body=f"{user['username']}: {body[:72]}",
+            actor_id=user["id"],
+            actor_username=user["username"],
+            group_id=group_id,
+        )
+    _schedule_notifications_refresh(recipient_ids)
 
     await _emit_group_chat_message(group_id, message)
 
@@ -1525,10 +1537,10 @@ async def delete_group(request: Request) -> JSONResponse:
 
     repository.delete_group(str(group_id))
 
-    for user in repository.list_users():
-        if group_id in user.get("groupsMember", []):
-            user["groupsMember"] = [item for item in user.get("groupsMember", []) if item != group_id]
-            repository.update_user(user)
+    member_ids = repository.list_user_ids_for_group(str(group_id))
+    for user in repository.list_users_by_ids(member_ids):
+        user["groupsMember"] = [item for item in user.get("groupsMember", []) if item != group_id]
+        repository.update_user(user)
 
     for event in repository.list_events():
         if event.get("groupId") == group_id:

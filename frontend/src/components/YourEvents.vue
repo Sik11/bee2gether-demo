@@ -882,4 +882,76 @@ const agendaHasNext = computed(() => (agendaPage.value + 1) * PAGE_SIZE < agenda
     align-items: stretch;
   }
 }
+
+@media (max-width: 620px) {
+  .month-shell,
+  .month-focus {
+    padding: 1rem;
+  }
+
+  .month-weekdays,
+  .month-grid {
+    min-width: 0;
+    gap: 0.35rem;
+  }
+
+  .month-weekdays {
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+  }
+
+  .month-cell {
+    min-height: 5.35rem;
+    padding: 0.45rem;
+    border-radius: 1rem;
+    gap: 0.3rem;
+  }
+
+  .month-cell__head {
+    justify-content: flex-start;
+  }
+
+  .month-day {
+    font-size: 0.92rem;
+  }
+
+  .today-pill {
+    display: none;
+  }
+
+  .month-cell__events {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.22rem;
+    margin-top: auto;
+  }
+
+  .month-event {
+    width: 0.55rem;
+    height: 0.55rem;
+    padding: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    display: block;
+    font-size: 0;
+    min-height: 0;
+  }
+
+  .month-event strong,
+  .month-event span {
+    display: none;
+  }
+
+  .month-more {
+    padding: 0;
+    background: none;
+    color: var(--accent-strong);
+    font-size: 0.65rem;
+    line-height: 1;
+  }
+
+  .month-focus__count {
+    align-self: flex-start;
+  }
+}
 </style>
