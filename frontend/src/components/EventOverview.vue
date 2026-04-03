@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   mdiAccountGroup,
   mdiClose,
@@ -20,11 +20,15 @@ import { formatDistanceLabel, formatEventDate, formatEventDateWithRange, formatE
 import { settings } from '../store/settings';
 import logo from '../assets/logo.png';
 import darkLogo from '../assets/dark-logo.png';
+import { addRealtimeListener, subscribeRealtimeChannel, unsubscribeRealtimeChannel } from '../store/realtime';
 
 const msg = ref('');
 const showJoin = ref(true);
 const comments = ref([]);
 const commentBody = ref('');
+let removeCommentCreatedListener = null;
+let removeCommentDeletedListener = null;
+let subscribedChannel = null;
 
 const activeLogo = computed(() => (settings.isDarkMode ? darkLogo : logo));
 const isSaved = computed(() => events.isEventSaved(events.selected.id));
@@ -96,19 +100,37 @@ async function postComment() {
   }
   const response = await addEventComment(events.selected.id, auth.user.userId, commentBody.value.trim());
   if (response.result) {
+    if (response.comment && !comments.value.some((entry) => entry.id === response.comment.id)) {
+      comments.value.push(response.comment);
+    }
     commentBody.value = '';
-    await loadComments();
   }
 }
 
 async function removeComment(commentId) {
   const response = await deleteEventComment(events.selected.id, commentId, auth.user.userId);
   if (response.result) {
-    await loadComments();
+    comments.value = comments.value.filter((entry) => entry.id !== commentId);
   }
 }
 
-watch(() => events.selected.id, loadComments, { immediate: true });
+watch(
+  () => events.selected.id,
+  async (eventId, previousEventId) => {
+    if (previousEventId) {
+      unsubscribeRealtimeChannel(`event:${previousEventId}`);
+    }
+    if (!eventId) {
+      comments.value = [];
+      return;
+    }
+
+    subscribedChannel = `event:${eventId}`;
+    subscribeRealtimeChannel(subscribedChannel);
+    await loadComments();
+  },
+  { immediate: true }
+);
 
 watch(() => events.selected.attendees, () => {
   if (!events.selected.attendees) {
@@ -118,7 +140,30 @@ watch(() => events.selected.attendees, () => {
   showJoin.value = !events.selected.attendees.some((attendee) => attendee.userId === auth.user.userId);
 }, { immediate: true });
 
-onMounted(loadComments);
+onMounted(() => {
+  removeCommentCreatedListener = addRealtimeListener('event.comment.created', (detail) => {
+    if (detail.eventId !== events.selected.id || !detail.comment) {
+      return;
+    }
+    if (!comments.value.some((entry) => entry.id === detail.comment.id)) {
+      comments.value.push(detail.comment);
+    }
+  });
+  removeCommentDeletedListener = addRealtimeListener('event.comment.deleted', (detail) => {
+    if (detail.eventId !== events.selected.id) {
+      return;
+    }
+    comments.value = comments.value.filter((entry) => entry.id !== detail.commentId);
+  });
+});
+
+onUnmounted(() => {
+  removeCommentCreatedListener?.();
+  removeCommentDeletedListener?.();
+  if (subscribedChannel) {
+    unsubscribeRealtimeChannel(subscribedChannel);
+  }
+});
 </script>
 
 <template>

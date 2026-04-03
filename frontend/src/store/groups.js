@@ -8,6 +8,12 @@ import { updateQueryState } from './urlState';
 export const groups = reactive({
     availableGroups: [],
     userGroups: [],
+    availableGroupsTotal: 0,
+    userGroupsTotal: 0,
+    loadingAvailableGroups: false,
+    loadingUserGroups: false,
+    hasLoadedAvailableGroups: false,
+    hasLoadedUserGroups: false,
     currentGroup: {
         name: '',
     },
@@ -47,6 +53,23 @@ export const groups = reactive({
     }
 });
 
+const ALL_GROUPS_POLL_INTERVAL_MS = 15000;
+const USER_GROUPS_POLL_INTERVAL_MS = 15000;
+const ALL_GROUPS_CACHE_MS = 12000;
+const USER_GROUPS_CACHE_MS = 12000;
+let allGroupsPollingStarted = false;
+let allGroupsPollInFlight = false;
+let userGroupsPollingStarted = false;
+let userGroupsPollInFlight = false;
+
+function isDocumentHidden() {
+    return typeof document !== 'undefined' && document.hidden;
+}
+
+function isAuthRoute() {
+    return typeof window !== 'undefined' && window.location.pathname === '/auth';
+}
+
 function normalizeGroup(group) {
     if (!group) {
         return group;
@@ -70,15 +93,35 @@ function normalizeGroups(collection) {
     return Array.isArray(collection) ? collection.map(normalizeGroup) : [];
 }
 
-export async function updateUserGroups(userId){
+export async function updateUserGroups(userId, options = {}){
     if (!userId) {
         getGroups().userGroups = [];
+        getGroups().userGroupsTotal = 0;
+        groups.hasLoadedUserGroups = false;
         return { result: false, msg: 'UserId is required' };
     }
+    const offset = Number(options.offset || 0);
+    const limit = Number(options.limit || 5);
+    const now = Date.now();
+    if (groups._userGroupsRequest?.key === `${userId}:${offset}:${limit}`) {
+        return groups._userGroupsRequest.promise;
+    }
+    if (
+        groups._userGroupsSnapshot?.key === `${userId}:${offset}:${limit}`
+        && now - groups._userGroupsSnapshot.at < USER_GROUPS_CACHE_MS
+    ) {
+        return { result: true, memberGroups: getGroups().userGroups, msg: 'Using cached user groups' };
+    }
+    groups.loadingUserGroups = true;
     try {
-        const response = await getGroupsAPI(userId);
+        const requestPromise = getGroupsAPI(userId, { offset, limit });
+        groups._userGroupsRequest = { key: `${userId}:${offset}:${limit}`, promise: requestPromise };
+        const response = await requestPromise;
         if (response.result) {
             getGroups().userGroups = normalizeGroups(response.memberGroups);
+            getGroups().userGroupsTotal = Number(response.total ?? getGroups().userGroups.length);
+            groups._userGroupsSnapshot = { key: `${userId}:${offset}:${limit}`, at: Date.now() };
+            groups.hasLoadedUserGroups = true;
         } else {
             if ((response.msg || '').toLowerCase().includes('user not found')) {
                 getGroups().userGroups = [];
@@ -89,8 +132,15 @@ export async function updateUserGroups(userId){
         }
         return response;
     } catch (error) {
-        console.error(error.message);
+        if (auth.isLoggedIn && auth.user?.userId) {
+            console.error(error.message);
+        }
         return { result: false, msg: error.message };
+    } finally {
+        groups.loadingUserGroups = false;
+        if (groups._userGroupsRequest?.key === `${userId}:${offset}:${limit}`) {
+            groups._userGroupsRequest = null;
+        }
     }
 }
 
@@ -108,16 +158,43 @@ export async function updateCurrentGroup(groupId){
 }
 
 
-export async function updateGroups() {
+export async function updateGroups(options = {}) {
+    const offset = Number(options.offset || 0);
+    const limit = Number(options.limit || 5);
+    const now = Date.now();
+    if (groups._allGroupsRequest?.key === `${offset}:${limit}`) {
+        return groups._allGroupsRequest.promise;
+    }
+    if (
+        groups._allGroupsSnapshot?.key === `${offset}:${limit}`
+        && now - groups._allGroupsSnapshot.at < ALL_GROUPS_CACHE_MS
+    ) {
+        return { result: true, groups: getGroups().availableGroups, msg: 'Using cached groups' };
+    }
+    groups.loadingAvailableGroups = true;
     try {
-        const response = await getAllGroups();
+        const requestPromise = getAllGroups({ offset, limit });
+        groups._allGroupsRequest = { key: `${offset}:${limit}`, promise: requestPromise };
+        const response = await requestPromise;
         if (response.result) {
             getGroups().availableGroups = normalizeGroups(response.groups);
+            getGroups().availableGroupsTotal = Number(response.total ?? getGroups().availableGroups.length);
+            groups._allGroupsSnapshot = { key: `${offset}:${limit}`, at: Date.now() };
+            groups.hasLoadedAvailableGroups = true;
         } else {
             console.error(response.msg || 'Failed to get user events');
         }
+        return response;
     } catch (error) {
-        console.error(error.message);
+        if (!isAuthRoute()) {
+            console.error(error.message);
+        }
+        return { result: false, msg: error.message };
+    } finally {
+        groups.loadingAvailableGroups = false;
+        if (groups._allGroupsRequest?.key === `${offset}:${limit}`) {
+            groups._allGroupsRequest = null;
+        }
     }
 }
 
@@ -125,23 +202,62 @@ export async function updateGroups() {
 export function getGroups() {
     return groups;
 }
+
+export function resetGroupsState() {
+    groups.loadingAvailableGroups = false;
+    groups.loadingUserGroups = false;
+    groups.hasLoadedAvailableGroups = false;
+    groups.hasLoadedUserGroups = false;
+    groups.availableGroups = [];
+    groups.userGroups = [];
+    groups.availableGroupsTotal = 0;
+    groups.userGroupsTotal = 0;
+    groups._allGroupsRequest = null;
+    groups._userGroupsRequest = null;
+    groups._allGroupsSnapshot = null;
+    groups._userGroupsSnapshot = null;
+    groups.currentGroup = { name: '' };
+}
 /**
  * Start polling for all groups and update application state.
  */
 export function startPollingAllGroups() {
-    getAllGroups()
-    .then((response) => {
-        if (response.result) {
-            // Assuming you have a function or a state to update all available groups
-            getGroups().availableGroups = normalizeGroups(response.groups);
+    if (allGroupsPollingStarted) {
+        return;
+    }
+    allGroupsPollingStarted = true;
+
+    const pollAllGroups = async () => {
+        if (allGroupsPollInFlight) {
+            setTimeout(pollAllGroups, ALL_GROUPS_POLL_INTERVAL_MS);
+            return;
         }
-    })
-    .then(() => {
-        setTimeout(startPollingAllGroups, 5000); // Poll every 5 seconds
-    })
-    .catch((error) => {
-        console.error('Error polling all groups:', error);
-    });
+
+        if (pages.selected !== 'groups') {
+            setTimeout(pollAllGroups, ALL_GROUPS_POLL_INTERVAL_MS);
+            return;
+        }
+
+        if (isDocumentHidden()) {
+            setTimeout(pollAllGroups, ALL_GROUPS_POLL_INTERVAL_MS);
+            return;
+        }
+
+        allGroupsPollInFlight = true;
+        try {
+            const response = await updateGroups();
+            if (response.result) {
+                getGroups().availableGroups = normalizeGroups(response.groups);
+            }
+        } catch (error) {
+            console.error('Error polling all groups:', error);
+        } finally {
+            allGroupsPollInFlight = false;
+            setTimeout(pollAllGroups, ALL_GROUPS_POLL_INTERVAL_MS);
+        }
+    };
+
+    pollAllGroups();
 }
 
 /**
@@ -149,29 +265,50 @@ export function startPollingAllGroups() {
  * 
  */
 export function startPollingUserGroups() {
-    if (!auth.isLoggedIn || !auth.user?.userId) {
-        // Wait for 5 seconds and then call the function again
-        setTimeout(startPollingUserGroups, 5000);
+    if (userGroupsPollingStarted) {
         return;
     }
+    userGroupsPollingStarted = true;
 
-    getGroupsAPI(auth.user.userId)
-        .then((response) => {
+    const pollUserGroups = async () => {
+        if (userGroupsPollInFlight) {
+            setTimeout(pollUserGroups, USER_GROUPS_POLL_INTERVAL_MS);
+            return;
+        }
+
+        if (!auth.isLoggedIn || !auth.user?.userId) {
+            setTimeout(pollUserGroups, USER_GROUPS_POLL_INTERVAL_MS);
+            return;
+        }
+
+        if (!['groups', 'events', 'account'].includes(pages.selected)) {
+            setTimeout(pollUserGroups, USER_GROUPS_POLL_INTERVAL_MS);
+            return;
+        }
+
+        if (isDocumentHidden()) {
+            setTimeout(pollUserGroups, USER_GROUPS_POLL_INTERVAL_MS);
+            return;
+        }
+
+        userGroupsPollInFlight = true;
+        try {
+            const response = await updateUserGroups(auth.user.userId);
             if (response.result) {
-                // Assuming you have a function or a state to update user-specific groups
                 getGroups().userGroups = normalizeGroups(response.memberGroups);
             } else if ((response.msg || '').toLowerCase().includes('user not found')) {
                 getGroups().userGroups = [];
-                return auth.recoverMissingUser();
+                await auth.recoverMissingUser();
             }
-        })
-        .then(() => {
-            // Continue polling every 5 seconds
-            setTimeout(startPollingUserGroups, 5000);
-        })
-        .catch((error) => {
+        } catch (error) {
             console.error('Error polling user groups:', error);
-        });
+        } finally {
+            userGroupsPollInFlight = false;
+            setTimeout(pollUserGroups, USER_GROUPS_POLL_INTERVAL_MS);
+        }
+    };
+
+    pollUserGroups();
 }
 
 
@@ -191,10 +328,8 @@ export async function addGroup(name, description, userId) {
         console.log("Result: " + result);
         console.log("GroupId: " + groupId);
         if (result && groupId) {
-            // const newGroup = { name, description, id: groupId}; // Assuming the creator is the first member
-            // // Update your application's state with newGroup
-            // // For example: appState.groups.push(newGroup);
-            // getGroups().availableGroups.push(newGroup);
+            await updateGroups();
+            await updateUserGroups(userId);
             return { result, msg };
         } else {
             return { result: false, msg: msg || 'Group creation failed' };
@@ -217,12 +352,8 @@ export async function joinUserGroup(groupId) {
         const { result, msg } = await joinGroup(userId, groupId);
         console.log("Join Group Result: " + result);
         if (result) {
-            // Assuming you have a method to update the user's groups in your application state
-            // Here, you might need to fetch the group details or have them already available
-            // const joinedGroup = groups.availableGroups.find(group => group.id === groupId);
-            // if (joinedGroup) {
-            //     getGroups().userGroups.push(joinedGroup);
-            // }
+            await updateGroups();
+            await updateUserGroups(userId);
             return { result, msg };
         } else {
             return { result: false, msg: msg || 'Failed to join group' };

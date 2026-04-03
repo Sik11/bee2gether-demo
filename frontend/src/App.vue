@@ -1,23 +1,42 @@
 <script setup>
-import { onMounted, onUnmounted, watch } from 'vue';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { RouterView, useRoute, useRouter } from 'vue-router';
 import { auth } from './store/auth';
 import { settings } from './store/settings';
 import { startTrackingLocation } from './store/userLocation';
-import { startPollingEvents, startPollingEventAttendees, updateSavedEvents, events } from './store/events';
-import { groups, startPollingAllGroups, startPollingUserGroups, updateGroups, updateUserGroups } from './store/groups';
-import { refreshNotifications } from './store/notifications';
+import { preloadPersonalEventData, events, resetEventsState } from './store/events';
+import { groups, updateGroups, updateUserGroups, resetGroupsState } from './store/groups';
+import { refreshNotifications, resetNotificationsState } from './store/notifications';
 import { pages } from './store/pages';
+import { connectRealtime, disconnectRealtime } from './store/realtime';
 
 const route = useRoute();
 const router = useRouter();
-let notificationIntervalId = null;
+const isAuthRoute = computed(() => route.name === 'auth');
+const deferredBootstrapTimers = new Set();
 
 startTrackingLocation();
-startPollingEvents();
-startPollingAllGroups();
-startPollingUserGroups();
-startPollingEventAttendees();
+
+function queueBootstrapTask(task, delay = 0) {
+  const timer = window.setTimeout(async () => {
+    deferredBootstrapTimers.delete(timer);
+    await task();
+  }, delay);
+  deferredBootstrapTimers.add(timer);
+}
+
+function clearBootstrapTasks() {
+  deferredBootstrapTimers.forEach((timer) => window.clearTimeout(timer));
+  deferredBootstrapTimers.clear();
+}
+
+async function preloadPrimaryViews() {
+  await Promise.allSettled([
+    import('./components/YourEvents.vue'),
+    import('./components/YourGroups.vue'),
+    import('./components/Account.vue'),
+  ]);
+}
 
 async function restoreOverlayState() {
   if (!auth.isLoggedIn || !auth.user?.userId) {
@@ -42,6 +61,28 @@ async function restoreOverlayState() {
   }
 }
 
+function bootstrapAuthenticatedData(userId) {
+  clearBootstrapTasks();
+  void preloadPrimaryViews();
+  void preloadPersonalEventData(userId);
+
+  const currentRoute = typeof route.name === 'string' ? route.name : 'map';
+
+  if (currentRoute === 'groups') {
+    void Promise.allSettled([updateUserGroups(userId), updateGroups()]);
+  } else if (currentRoute === 'account') {
+    void Promise.allSettled([updateUserGroups(userId), refreshNotifications()]);
+    queueBootstrapTask(() => updateGroups(), 600);
+  } else if (currentRoute === 'events') {
+    void updateUserGroups(userId);
+    queueBootstrapTask(() => refreshNotifications(), 450);
+  } else {
+    queueBootstrapTask(() => refreshNotifications(), 450);
+    queueBootstrapTask(() => updateUserGroups(userId), 900);
+    queueBootstrapTask(() => updateGroups(), 1500);
+  }
+}
+
 watch(
   () => route.name,
   (name) => {
@@ -55,6 +96,9 @@ watch(
 watch(
   () => route.query,
   async () => {
+    if (isAuthRoute.value || !auth.isLoggedIn) {
+      return;
+    }
     await restoreOverlayState();
   },
   { deep: true }
@@ -64,49 +108,75 @@ watch(
   () => auth.user?.userId,
   async (userId) => {
     if (!auth.isLoggedIn || !userId) {
+      clearBootstrapTasks();
+      disconnectRealtime({ clearSubscriptions: true });
+      resetEventsState();
+      resetGroupsState();
+      resetNotificationsState();
       router.replace({ name: 'auth' });
       return;
     }
-    await Promise.all([
-      updateSavedEvents(userId),
-      updateUserGroups(userId),
-      updateGroups(),
-      refreshNotifications(),
-    ]);
     if (route.name === 'auth') {
       router.replace({ name: 'map' });
     }
-    await restoreOverlayState();
+    bootstrapAuthenticatedData(userId);
+    void connectRealtime();
+    void restoreOverlayState();
+  },
+  { immediate: true }
+);
+
+watch(
+  isAuthRoute,
+  (value) => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const root = document.documentElement;
+    const app = document.getElementById('app');
+
+    document.body.style.overflow = value ? 'auto' : 'hidden';
+    document.body.style.height = value ? 'auto' : '100%';
+    root.style.overflow = value ? 'auto' : 'hidden';
+    root.style.height = value ? 'auto' : '100%';
+
+    if (app) {
+      app.style.overflow = value ? 'visible' : 'hidden';
+      app.style.height = value ? 'auto' : '100%';
+      app.style.minHeight = value ? '100dvh' : '100%';
+    }
   },
   { immediate: true }
 );
 
 onMounted(async () => {
   if (auth.isLoggedIn && auth.user?.userId) {
-    await Promise.all([
-      updateSavedEvents(auth.user.userId),
-      updateUserGroups(auth.user.userId),
-      updateGroups(),
-      refreshNotifications(),
-    ]);
-    await restoreOverlayState();
+    bootstrapAuthenticatedData(auth.user.userId);
+    void connectRealtime();
   }
-  notificationIntervalId = window.setInterval(() => {
-    if (auth.isLoggedIn && auth.user?.userId) {
-      refreshNotifications();
-    }
-  }, 10000);
 });
 
 onUnmounted(() => {
-  if (notificationIntervalId) {
-    window.clearInterval(notificationIntervalId);
+  clearBootstrapTasks();
+  if (typeof document !== 'undefined') {
+    const root = document.documentElement;
+    const app = document.getElementById('app');
+    document.body.style.overflow = 'hidden';
+    document.body.style.height = '100%';
+    root.style.overflow = 'hidden';
+    root.style.height = '100%';
+    if (app) {
+      app.style.overflow = 'hidden';
+      app.style.height = '100%';
+      app.style.minHeight = '100%';
+    }
   }
+  disconnectRealtime();
 });
 </script>
 
 <template>
-  <div :class="['viewport', { 'dark-mode': settings.isDarkMode }]">
+  <div :class="['viewport', { 'dark-mode': settings.isDarkMode, 'auth-route': isAuthRoute }]">
     <RouterView />
   </div>
 </template>
@@ -162,6 +232,12 @@ img {
   width: 100%;
   height: 100dvh;
   overflow: hidden;
+}
+
+.viewport.auth-route {
+  min-height: 100dvh;
+  height: auto;
+  overflow-y: auto;
 }
 
 #app {

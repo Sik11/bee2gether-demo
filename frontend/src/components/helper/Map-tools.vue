@@ -13,9 +13,12 @@ const { customClass } = defineProps({
 const isRefreshing = ref(false);
 
 const canRefreshNearby = computed(() =>
-  Number.isFinite(userLocation.location?.lat)
-  && Number.isFinite(userLocation.location?.lng)
-  && (userLocation.location.lat !== 0 || userLocation.location.lng !== 0)
+  Boolean(getEvents().viewportBounds)
+  || (
+    Number.isFinite(userLocation.location?.lat)
+    && Number.isFinite(userLocation.location?.lng)
+    && (userLocation.location.lat !== 0 || userLocation.location.lng !== 0)
+  )
 );
 
 async function refreshNearby() {
@@ -26,7 +29,11 @@ async function refreshNearby() {
   isRefreshing.value = true;
   const startedAt = Date.now();
   try {
-    await getEvents().updateAvailableEvents(userLocation.location.lat, userLocation.location.lng);
+    if (getEvents().viewportBounds) {
+      await getEvents().updateAvailableEventsForBounds(getEvents().viewportBounds);
+    } else {
+      await getEvents().updateAvailableEvents(userLocation.location.lat, userLocation.location.lng);
+    }
   } finally {
     const visibleDuration = Date.now() - startedAt;
     const remainingDelay = Math.max(0, 650 - visibleDuration);

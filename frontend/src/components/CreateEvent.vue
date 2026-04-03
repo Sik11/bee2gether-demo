@@ -33,7 +33,6 @@ const latitude = ref(null);
 const tagsLimit = ref(10);
 let locationSearchToken = 0;
 let suggestionTimeoutId = null;
-const ukBounds = '-8.8,49.8,1.9,60.9';
 
 const activeLogo = computed(() => (settings.isDarkMode ? darkLogo : logo));
 const selectedPlaceTitle = computed(() => {
@@ -137,29 +136,20 @@ async function fetchLocationSuggestions(query) {
   const token = ++locationSearchToken;
   try {
     const response = await fetch(
-      `https://photon.komoot.io/api/?limit=5&bbox=${encodeURIComponent(ukBounds)}&q=${encodeURIComponent(nextQuery)}`
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&addressdetails=1&dedupe=1&q=${encodeURIComponent(nextQuery)}`
     );
     const payload = await response.json();
     if (token !== locationSearchToken) {
       return;
     }
-    locationSuggestions.value = (payload.features || [])
-      .map((feature) => {
-        const properties = feature.properties || {};
-        const [lng, lat] = feature.geometry?.coordinates || [];
-        const subtitleParts = [
-          properties.street,
-          properties.city || properties.town || properties.county,
-          properties.country,
-        ].filter(Boolean);
-        return {
-          id: properties.osm_id || properties.osm_key || `${lat}-${lng}`,
-          title: properties.name || properties.street || properties.city || properties.county || nextQuery,
-          subtitle: subtitleParts.join(', '),
-          lat: Number(lat),
-          lng: Number(lng),
-        };
-      })
+    locationSuggestions.value = (payload || [])
+      .map((result) => ({
+        id: result.place_id,
+        title: result.display_name.split(',')[0],
+        subtitle: result.display_name,
+        lat: Number(result.lat),
+        lng: Number(result.lon),
+      }))
       .filter((result) => Number.isFinite(result.lat) && Number.isFinite(result.lng));
     showSuggestions.value = locationSuggestions.value.length > 0;
   } catch (_error) {

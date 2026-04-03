@@ -7,16 +7,19 @@ const password = ref('');
 const errorMsg = ref('');
 
 const login = async () => {
+  if (auth.isBusy) return;
   const response = await auth.login(username.value, password.value);
   errorMsg.value = (!response.result) ? response.msg : '';
 };
 
 const register = async () => {
+  if (auth.isBusy) return;
   const response = await auth.register(username.value, password.value);
   errorMsg.value = (!response.result) ? response.msg : '';
 };
 
 const continueAsGuest = async () => {
+  if (auth.isBusy) return;
   const response = await auth.continueAsGuest();
   errorMsg.value = (!response.result) ? response.msg : '';
 };
@@ -37,6 +40,9 @@ const continueAsGuest = async () => {
     </section>
 
     <section class="auth-panel soft-panel">
+      <div v-if="auth.isBusy" class="auth-progress" aria-hidden="true">
+        <span class="auth-progress__bar"></span>
+      </div>
       <div class="auth-panel__header">
         <p class="eyebrow">Welcome back</p>
         <h2>Sign in or create an account</h2>
@@ -54,6 +60,7 @@ const continueAsGuest = async () => {
             type="text"
             placeholder="Your username"
             autocomplete="username"
+            :disabled="auth.isBusy"
           />
         </label>
         <label class="field-group">
@@ -64,21 +71,31 @@ const continueAsGuest = async () => {
             type="password"
             placeholder="10 to 20 characters"
             autocomplete="current-password"
+            :disabled="auth.isBusy"
           />
         </label>
 
         <div v-if="errorMsg" class="error-message">{{ errorMsg }}</div>
+        <div v-if="auth.isBusy" class="auth-status">{{ auth.busyLabel }}…</div>
 
         <div class="auth-actions">
-          <button type="submit" class="btn btn-primary auth-btn">Log In</button>
-          <button type="button" class="btn btn-secondary auth-btn" @click="register">Create Account</button>
+          <button type="submit" class="btn btn-primary auth-btn" :disabled="auth.isBusy">
+            <span v-if="auth.busyLabel === 'Signing in'" class="button-loader" aria-hidden="true"></span>
+            <span>{{ auth.busyLabel === 'Signing in' ? 'Signing in' : 'Log In' }}</span>
+          </button>
+          <button type="button" class="btn btn-secondary auth-btn" @click="register" :disabled="auth.isBusy">
+            <span v-if="auth.busyLabel === 'Creating account'" class="button-loader" aria-hidden="true"></span>
+            <span>{{ auth.busyLabel === 'Creating account' ? 'Creating account' : 'Create Account' }}</span>
+          </button>
         </div>
         <button
           type="button"
           class="btn btn-ghost guest-btn"
           @click="continueAsGuest"
+          :disabled="auth.isBusy"
         >
-          Continue as guest
+          <span v-if="auth.busyLabel === 'Opening guest session'" class="button-loader" aria-hidden="true"></span>
+          <span>{{ auth.busyLabel === 'Opening guest session' ? 'Opening guest session' : 'Continue as guest' }}</span>
         </button>
       </form>
     </section>
@@ -91,6 +108,7 @@ const continueAsGuest = async () => {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(22rem, 28rem);
   background: var(--canvas);
+  overflow-y: auto;
 }
 
 .auth-hero {
@@ -157,6 +175,25 @@ const continueAsGuest = async () => {
     linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, transparent), color-mix(in srgb, var(--canvas-strong) 88%, transparent));
 }
 
+.auth-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0.22rem;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.auth-progress__bar {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent) 22%, color-mix(in srgb, var(--accent) 55%, white 45%) 55%, transparent 100%);
+  animation: auth-progress-slide 1.05s ease-in-out infinite;
+}
+
 .auth-panel__header {
   margin-bottom: 1.5rem;
 
@@ -173,6 +210,11 @@ const continueAsGuest = async () => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.auth-status {
+  font-size: 0.92rem;
+  color: var(--ink-muted);
 }
 
 .field-group {
@@ -200,6 +242,23 @@ const continueAsGuest = async () => {
 
 .guest-btn {
   margin-top: 0.25rem;
+}
+
+.auth-actions .btn,
+.guest-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+}
+
+.button-loader {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-top-color: currentColor;
+  animation: button-loader-spin 0.7s linear infinite;
 }
 
 .error-message {
@@ -262,6 +321,7 @@ const continueAsGuest = async () => {
 @media (max-width: 960px) {
   .auth-screen {
     grid-template-columns: 1fr;
+    min-height: auto;
   }
 
   .auth-hero {
@@ -279,16 +339,41 @@ const continueAsGuest = async () => {
     border-top: 1px solid var(--border);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     margin-top: -1.5rem;
+    padding-bottom: max(2rem, env(safe-area-inset-bottom));
   }
 }
 
 @media (max-width: 640px) {
+  .auth-screen {
+    align-content: start;
+  }
+
   .auth-hero__content {
     min-height: 20rem;
   }
 
   .auth-actions {
     grid-template-columns: 1fr;
+  }
+
+  .auth-panel {
+    padding-inline: 1.1rem;
+    padding-bottom: max(2.4rem, env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes auth-progress-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes button-loader-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

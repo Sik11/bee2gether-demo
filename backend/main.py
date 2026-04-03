@@ -12,7 +12,7 @@ from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 import bcrypt
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 import requests
@@ -41,6 +41,86 @@ app.add_middleware(
 )
 
 
+class RealtimeManager:
+    def __init__(self) -> None:
+        self.user_connections: dict[str, set[WebSocket]] = {}
+        self.socket_users: dict[WebSocket, str] = {}
+        self.channel_connections: dict[str, set[WebSocket]] = {}
+        self.socket_channels: dict[WebSocket, set[str]] = {}
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+
+    async def disconnect(self, websocket: WebSocket) -> None:
+        user_id = self.socket_users.pop(websocket, None)
+        if user_id and user_id in self.user_connections:
+            self.user_connections[user_id].discard(websocket)
+            if not self.user_connections[user_id]:
+                self.user_connections.pop(user_id, None)
+
+        for channel in self.socket_channels.pop(websocket, set()):
+            listeners = self.channel_connections.get(channel)
+            if listeners:
+                listeners.discard(websocket)
+                if not listeners:
+                    self.channel_connections.pop(channel, None)
+
+    async def identify(self, websocket: WebSocket, payload: dict[str, Any]) -> dict[str, Any]:
+        user = _lookup_user(payload)
+        if user is None:
+            raise HTTPException(status_code=400, detail="User not found.")
+
+        previous_user_id = self.socket_users.get(websocket)
+        if previous_user_id and previous_user_id in self.user_connections:
+            self.user_connections[previous_user_id].discard(websocket)
+            if not self.user_connections[previous_user_id]:
+                self.user_connections.pop(previous_user_id, None)
+
+        self.socket_users[websocket] = user["id"]
+        self.user_connections.setdefault(user["id"], set()).add(websocket)
+        return user
+
+    async def subscribe(self, websocket: WebSocket, channel: str) -> None:
+        if not channel:
+            return
+        self.socket_channels.setdefault(websocket, set()).add(channel)
+        self.channel_connections.setdefault(channel, set()).add(websocket)
+
+    async def unsubscribe(self, websocket: WebSocket, channel: str) -> None:
+        listeners = self.channel_connections.get(channel)
+        if listeners:
+            listeners.discard(websocket)
+            if not listeners:
+                self.channel_connections.pop(channel, None)
+        self.socket_channels.get(websocket, set()).discard(channel)
+
+    async def send(self, websocket: WebSocket, message: dict[str, Any]) -> None:
+        try:
+            await websocket.send_json(message)
+        except Exception:
+            await self.disconnect(websocket)
+
+    async def emit_to_user(self, user_id: str, message: dict[str, Any]) -> None:
+        for websocket in list(self.user_connections.get(user_id, set())):
+            await self.send(websocket, message)
+
+    async def emit_to_channel(self, channel: str, message: dict[str, Any]) -> None:
+        for websocket in list(self.channel_connections.get(channel, set())):
+            await self.send(websocket, message)
+
+    async def broadcast(self, message: dict[str, Any]) -> None:
+        all_sockets = {
+            websocket
+            for websockets in self.user_connections.values()
+            for websocket in websockets
+        }
+        for websocket in list(all_sockets):
+            await self.send(websocket, message)
+
+
+realtime_manager = RealtimeManager()
+
+
 def _json_error(message: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"result": False, "msg": message}, status_code=status_code)
 
@@ -65,11 +145,7 @@ def _group_response(group: dict[str, Any]) -> dict[str, Any]:
     member_ids = payload.get("memberIds")
     if not isinstance(member_ids, list) or not member_ids:
         group_id = str(payload.get("id", ""))
-        member_ids = [
-            user["id"]
-            for user in repository.list_users()
-            if group_id and group_id in user.get("groupsMember", [])
-        ]
+        member_ids = repository.list_user_ids_for_group(group_id) if group_id else []
         payload["memberIds"] = member_ids
 
     payload["memberCount"] = len(member_ids)
@@ -79,6 +155,28 @@ def _group_response(group: dict[str, Any]) -> dict[str, Any]:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_pagination_value(value: Any, default: int, *, minimum: int = 0, maximum: int | None = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
+def _pagination_from_mapping(mapping: Any, *, default_limit: int = 5) -> tuple[int, int]:
+    offset = _parse_pagination_value(getattr(mapping, "get", lambda *_: None)("offset"), 0)
+    limit = _parse_pagination_value(getattr(mapping, "get", lambda *_: None)("limit"), default_limit, minimum=1, maximum=50)
+    return offset, limit
+
+
+def _slice_items(items: list[Any], offset: int, limit: int) -> tuple[list[Any], int]:
+    total = len(items)
+    return items[offset: offset + limit], total
 
 
 def _append_notification(
@@ -128,6 +226,88 @@ def _notification_response(notification: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(notification)
 
 
+async def _emit_notifications_state(user_id: str) -> None:
+    user = repository.get_user_by_id(user_id)
+    if user is None:
+        return
+    notifications = [_notification_response(item) for item in user.get("notifications", [])]
+    await realtime_manager.emit_to_user(
+        user_id,
+        {
+            "type": "notifications.updated",
+            "userId": user_id,
+            "notifications": notifications,
+            "unreadCount": sum(1 for item in notifications if not item.get("read")),
+        },
+    )
+
+
+def _attendees_payload(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "eventId": event["id"],
+        "attendees": list(event.get("attendees", [])),
+        "attendeeCount": len(event.get("attendees", [])),
+    }
+
+
+async def _emit_event_attendance_update(event: dict[str, Any]) -> None:
+    payload = {
+        "type": "event.attendance.updated",
+        **_attendees_payload(event),
+    }
+    await realtime_manager.emit_to_channel(f"event:{event['id']}", payload)
+    if event.get("userId"):
+        await realtime_manager.emit_to_user(event["userId"], payload)
+
+
+async def _emit_event_comment_created(event: dict[str, Any], comment: dict[str, Any]) -> None:
+    payload = {
+        "type": "event.comment.created",
+        "eventId": event["id"],
+        "comment": _comment_response(comment),
+    }
+    await realtime_manager.emit_to_channel(f"event:{event['id']}", payload)
+    if event.get("userId"):
+        await realtime_manager.emit_to_user(event["userId"], payload)
+
+
+async def _emit_event_comment_deleted(event_id: str, comment_id: str, owner_user_id: str | None = None) -> None:
+    payload = {
+        "type": "event.comment.deleted",
+        "eventId": event_id,
+        "commentId": comment_id,
+    }
+    await realtime_manager.emit_to_channel(f"event:{event_id}", payload)
+    if owner_user_id:
+        await realtime_manager.emit_to_user(owner_user_id, payload)
+
+
+async def _emit_group_chat_message(group_id: str, message: dict[str, Any]) -> None:
+    await realtime_manager.emit_to_channel(
+        f"group:{group_id}",
+        {
+            "type": "group.chat.message.created",
+            "groupId": group_id,
+            "message": _message_response(message),
+        },
+    )
+
+
+async def _emit_group_updated(group: dict[str, Any], *, affected_user_ids: list[str] | None = None) -> None:
+    payload = {
+        "type": "group.updated",
+        "group": _group_response(group),
+    }
+    await realtime_manager.broadcast(payload)
+
+    membership_payload = {
+        "type": "group.membership.updated",
+        "group": _group_response(group),
+    }
+    for user_id in affected_user_ids or []:
+        await realtime_manager.emit_to_user(user_id, membership_payload)
+
+
 @api_router.get("/health")
 async def health_check() -> dict[str, Any]:
     return {
@@ -135,6 +315,47 @@ async def health_check() -> dict[str, Any]:
         "status": "ok",
         "database": "memory" if settings.use_memory_db else "mongo",
     }
+
+
+@api_router.websocket("/realtime")
+async def realtime_socket(websocket: WebSocket) -> None:
+    await realtime_manager.connect(websocket)
+    try:
+        while True:
+            message = await websocket.receive_json()
+            message_type = str(message.get("type", "")).strip()
+            payload = message.get("payload") or {}
+
+            if message_type == "auth.identify":
+                try:
+                    user = await realtime_manager.identify(websocket, payload)
+                except HTTPException as error:
+                    await realtime_manager.send(
+                        websocket,
+                        {"type": "error", "message": str(error.detail), "statusCode": error.status_code},
+                    )
+                    continue
+                await realtime_manager.send(
+                    websocket,
+                    {
+                        "type": "auth.identified",
+                        "userId": user["id"],
+                        "username": user["username"],
+                    },
+                )
+                continue
+
+            if message_type == "subscribe":
+                channel = str(message.get("channel", "")).strip()
+                await realtime_manager.subscribe(websocket, channel)
+                continue
+
+            if message_type == "unsubscribe":
+                channel = str(message.get("channel", "")).strip()
+                await realtime_manager.unsubscribe(websocket, channel)
+                continue
+    except WebSocketDisconnect:
+        await realtime_manager.disconnect(websocket)
 
 
 def _lookup_user(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -571,18 +792,22 @@ async def create_group(request: Request) -> JSONResponse:
             creator["groupsMember"].append(group_id)
             repository.update_user(creator)
 
+    await _emit_group_updated(group, affected_user_ids=[user_id])
+
     return JSONResponse({"result": True, "msg": "Group created successfully", "groupId": group_id})
 
 
 @api_router.api_route("/getAllGroups", methods=["GET"])
-def get_all_groups() -> JSONResponse:
+def get_all_groups(request: Request) -> JSONResponse:
     _cleanup_expired_events()
+    offset, limit = _pagination_from_mapping(request.query_params)
     groups = [_group_response(group) for group in repository.list_groups()]
+    groups, total = _slice_items(groups, offset, limit)
     for group in groups:
         group["events"] = [_event_response(event) for event in group.get("events", [])]
     if not groups:
-        return JSONResponse({"result": True, "msg": "No groups found", "groups": []})
-    return JSONResponse({"result": True, "msg": "Groups retrieved successfully", "groups": groups})
+        return JSONResponse({"result": True, "msg": "No groups found", "groups": [], "total": total, "offset": offset, "limit": limit})
+    return JSONResponse({"result": True, "msg": "Groups retrieved successfully", "groups": groups, "total": total, "offset": offset, "limit": limit})
 
 
 @api_router.api_route("/joinGroup", methods=["POST"])
@@ -614,6 +839,8 @@ async def join_group(request: Request) -> JSONResponse:
             actor_username=user["username"],
             group_id=str(group_id),
         )
+        await _emit_notifications_state(owner["id"])
+    await _emit_group_updated(group, affected_user_ids=[user["id"], group["userId"]])
     return JSONResponse({"result": True, "msg": "Joined group successfully"})
 
 
@@ -631,11 +858,14 @@ async def get_all_user_groups(request: Request) -> JSONResponse:
     for group_id in user.get("groupsMember", []):
         group = repository.get_group_by_id(group_id)
         if group:
-            payload = _group_response(group)
-            payload["events"] = [_event_response(event) for event in payload.get("events", [])]
-            groups.append(payload)
+            group_payload = _group_response(group)
+            group_payload["events"] = [_event_response(event) for event in group_payload.get("events", [])]
+            groups.append(group_payload)
 
-    return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "memberGroups": groups})
+    offset, limit = _pagination_from_mapping(payload)
+    groups, total = _slice_items(groups, offset, limit)
+
+    return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "memberGroups": groups, "total": total, "offset": offset, "limit": limit})
 
 
 @api_router.api_route("/createEvent", methods=["PUT"])
@@ -777,6 +1007,9 @@ async def add_attending_event(request: Request) -> JSONResponse:
                 event_id=event_id,
                 group_id=event.get("groupId"),
             )
+            await _emit_notifications_state(event["userId"])
+
+    await _emit_event_attendance_update(event)
 
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "eventId": event_id})
 
@@ -806,6 +1039,8 @@ async def remove_attending_event(request: Request) -> JSONResponse:
     if event.get("groupId"):
         _replace_group_event(event["groupId"], event)
 
+    await _emit_event_attendance_update(event)
+
     return JSONResponse({"result": True, "msg": "OK", "userId": user["id"], "eventId": event_id})
 
 
@@ -820,18 +1055,24 @@ async def get_attending_events(request: Request) -> JSONResponse:
     if user is None:
         return _json_error("User not found.", 400)
 
-    events = []
+    attending_events = []
     for event_id in user.get("eventsAttending", []):
         event = repository.get_event_by_id(event_id)
         if event:
-            events.append(_event_response(event))
+            attending_events.append(_event_response(event))
+
+    offset, limit = _pagination_from_mapping(payload)
+    paged_events, total = _slice_items(attending_events, offset, limit)
 
     return JSONResponse(
         {
             "result": True,
             "msg": "OK",
             "userId": user["id"],
-            "attendingEvents": events,
+            "attendingEvents": paged_events,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
         }
     )
 
@@ -853,12 +1094,69 @@ async def get_saved_events(request: Request) -> JSONResponse:
         if event and _event_status(event) != "ended":
             saved_events.append(_event_response(event))
 
+    offset, limit = _pagination_from_mapping(payload)
+    paged_events, total = _slice_items(saved_events, offset, limit)
+
     return JSONResponse(
         {
             "result": True,
             "msg": "OK",
             "userId": user["id"],
-            "savedEvents": saved_events,
+            "savedEvents": paged_events,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+        }
+    )
+
+
+@api_router.api_route("/getPlanningEvents", methods=["POST"])
+async def get_planning_events(request: Request) -> JSONResponse:
+    _cleanup_expired_events()
+    payload = await request.json()
+    if not payload.get("userId") and not payload.get("username"):
+        return _json_error("Username or UserId is required", 400)
+
+    user = _lookup_user(payload)
+    if user is None:
+        return _json_error("User not found.", 400)
+
+    month = str(payload.get("month", "")).strip()
+    month_start: datetime | None = None
+    month_end: datetime | None = None
+    if month:
+        try:
+            month_start = datetime.strptime(month, "%Y-%m").replace(tzinfo=timezone.utc)
+            month_end = datetime(month_start.year + (month_start.month // 12), (month_start.month % 12) + 1, 1, tzinfo=timezone.utc)
+        except ValueError:
+            return _json_error("month must be in YYYY-MM format", 400)
+
+    merged: dict[str, dict[str, Any]] = {}
+    for event_id in [*user.get("eventsAttending", []), *user.get("savedEvents", [])]:
+        event = repository.get_event_by_id(event_id)
+        if not event or _event_status(event) == "ended":
+            continue
+        event_dt = _event_datetime(event.get("startTime") or event.get("time"))
+        if month_start and (not event_dt or event_dt < month_start or event_dt >= month_end):
+            continue
+        merged[event["id"]] = _event_response(event)
+
+    planning_events = sorted(
+        merged.values(),
+        key=lambda item: (_event_datetime(item.get("startTime") or item.get("time")) or datetime.max.replace(tzinfo=timezone.utc)),
+    )
+    offset, limit = _pagination_from_mapping(payload, default_limit=5 if not month else 50)
+    paged_events, total = _slice_items(planning_events, offset, limit)
+    return JSONResponse(
+        {
+            "result": True,
+            "msg": "OK",
+            "userId": user["id"],
+            "events": paged_events,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "month": month or None,
         }
     )
 
@@ -896,6 +1194,7 @@ async def mark_notifications_read(request: Request) -> JSONResponse:
         if mark_all or notification.get("id") in notification_ids:
             notification["read"] = True
     repository.update_user(user)
+    await _emit_notifications_state(user["id"])
     return JSONResponse({"result": True, "msg": "Notifications updated"})
 
 
@@ -1004,6 +1303,8 @@ async def add_event_comment(request: Request) -> JSONResponse:
             event_id=event_id,
             group_id=event.get("groupId"),
         )
+        await _emit_notifications_state(event["userId"])
+    await _emit_event_comment_created(event, comment)
     return JSONResponse({"result": True, "comment": _comment_response(comment)})
 
 
@@ -1030,6 +1331,7 @@ async def delete_event_comment(request: Request) -> JSONResponse:
     repository.update_event(event)
     if event.get("groupId"):
         _replace_group_event(event["groupId"], event)
+    await _emit_event_comment_deleted(event_id, comment_id, event.get("userId"))
     return JSONResponse({"result": True, "msg": "Comment deleted"})
 
 
@@ -1169,6 +1471,9 @@ async def send_group_chat_message(request: Request) -> JSONResponse:
                 actor_username=user["username"],
                 group_id=group_id,
             )
+            await _emit_notifications_state(recipient["id"])
+
+    await _emit_group_chat_message(group_id, message)
 
     return JSONResponse({"result": True, "message": _message_response(message)})
 

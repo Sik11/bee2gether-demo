@@ -8,6 +8,7 @@ import heartBackground from '../assets/heart-background.png';
 import { auth } from '../store/auth';
 import { getGroupChatMessages, sendGroupChatMessage } from '../api';
 import { formatEventDate, formatEventTimeRange } from '../utils/eventMeta';
+import { addRealtimeListener, subscribeRealtimeChannel, unsubscribeRealtimeChannel } from '../store/realtime';
 
 const emit = defineEmits(['backToMap']);
 
@@ -36,7 +37,8 @@ const currentTitle = computed(() => groups.currentGroup.name);
 const isOwner = computed(() => groups.currentGroup.userId === auth.user.userId);
 const chatMessages = ref([]);
 const chatBody = ref('');
-let chatInterval = null;
+let removeRealtimeListener = null;
+let subscribedChannel = null;
 
 function createGroupEvent() {
   groups.currentGroupIdForEvents = groups.currentGroup.id;
@@ -61,18 +63,46 @@ async function sendMessage() {
   const response = await sendGroupChatMessage(groups.currentGroup.id, auth.user.userId, chatBody.value.trim());
   if (response.result) {
     chatBody.value = '';
-    await refreshChat();
+    if (response.message && !chatMessages.value.some((message) => message.id === response.message.id)) {
+      chatMessages.value.push(response.message);
+    }
   }
 }
 
-watch(() => groups.currentGroup.id, refreshChat, { immediate: true });
+watch(
+  () => groups.currentGroup.id,
+  async (groupId, previousGroupId) => {
+    if (previousGroupId) {
+      unsubscribeRealtimeChannel(`group:${previousGroupId}`);
+    }
+    if (!groupId) {
+      chatMessages.value = [];
+      return;
+    }
+
+    subscribedChannel = `group:${groupId}`;
+    subscribeRealtimeChannel(subscribedChannel);
+    await refreshChat();
+  },
+  { immediate: true }
+);
 
 onMounted(() => {
-  chatInterval = window.setInterval(refreshChat, 5000);
+  removeRealtimeListener = addRealtimeListener('group.chat.message.created', (detail) => {
+    if (detail.groupId !== groups.currentGroup.id || !detail.message) {
+      return;
+    }
+    if (!chatMessages.value.some((message) => message.id === detail.message.id)) {
+      chatMessages.value.push(detail.message);
+    }
+  });
 });
 
 onUnmounted(() => {
-  window.clearInterval(chatInterval);
+  removeRealtimeListener?.();
+  if (subscribedChannel) {
+    unsubscribeRealtimeChannel(subscribedChannel);
+  }
 });
 </script>
 
@@ -122,7 +152,7 @@ onUnmounted(() => {
           <p class="eyebrow">Group chat</p>
           <h3>Talk to the hive</h3>
         </div>
-        <button type="button" class="btn btn-secondary" @click="refreshChat">Refresh chat</button>
+        <button type="button" class="btn btn-secondary" @click="refreshChat">Reload history</button>
       </div>
       <div v-if="chatMessages.length" class="chat-list">
         <article v-for="message in chatMessages" :key="message.id" class="chat-message">

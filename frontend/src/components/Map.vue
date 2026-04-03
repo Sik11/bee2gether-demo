@@ -1,6 +1,9 @@
 <template>
   <div class="viewport">
     <div ref="mapElement" class="map-surface"></div>
+    <div v-if="showMapLoading || showMapRefreshing" :class="['map-loading-indicator', { 'map-loading-indicator--floating': showMapRefreshing }]" aria-label="Loading events">
+      <span class="map-loading-indicator__spinner" aria-hidden="true"></span>
+    </div>
     <SearchBar custom-class="search-bar" @select="onEventClicked" />
     <MapTools custom-class="filter" />
     <div class="map-controls" aria-label="Map controls">
@@ -27,7 +30,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import maplibregl from 'maplibre-gl';
 import { getEvents } from "../store/events.js";
 import { getUserLocation } from "../store/userLocation.js";
@@ -41,6 +44,8 @@ const emit = defineEmits(["eventClicked"]);
 const events = getEvents();
 const userLocation = getUserLocation();
 const mapElement = ref(null);
+const showMapLoading = computed(() => events.loadingAvailableEvents && !events.hasLoadedAvailableEvents);
+const showMapRefreshing = computed(() => events.loadingAvailableEvents && events.hasLoadedAvailableEvents);
 
 const fallbackCenter = { lat: 51.3948326453863, lng: -1.3221 };
 const styleUrl = "https://tiles.openfreemap.org/styles/liberty";
@@ -143,7 +148,6 @@ const darkBeeTheme = {
 let mapInstance = null;
 let userMarker = null;
 let hasCenteredOnUser = false;
-let hasLoadedInitialEvents = false;
 let buildingLayerSpec = null;
 const isThreeDimensional = ref(false);
 function createUserMarkerElement() {
@@ -462,8 +466,11 @@ async function ensureHiveIcon() {
 
   const image = new Image();
   image.decoding = "async";
-  image.src = hiveMarkerAsset;
-  await image.decode();
+  await new Promise((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Failed to load hive marker asset"));
+    image.src = hiveMarkerAsset;
+  });
   const drawWidth = 90;
   const drawHeight = 104;
   const drawX = (size - drawWidth) / 2;
@@ -554,13 +561,37 @@ function syncUserMarker() {
   updateUserMarkerScale();
 }
 
-async function preloadVisibleEvents(location = getPreferredCenter()) {
-  if (hasLoadedInitialEvents) {
+async function refreshVisibleEvents() {
+  if (!mapInstance) {
     return;
   }
 
-  hasLoadedInitialEvents = true;
-  await events.updateAvailableEvents(location.lat, location.lng);
+  await events.updateAvailableEventsForBounds(getExpandedViewportBounds(mapInstance.getBounds()));
+}
+
+function getExpandedViewportBounds(rawBounds, padFactor = 0.24) {
+  if (!rawBounds) {
+    return rawBounds;
+  }
+
+  const south = Number(rawBounds.getSouth?.() ?? rawBounds._sw?.lat);
+  const west = Number(rawBounds.getWest?.() ?? rawBounds._sw?.lng);
+  const north = Number(rawBounds.getNorth?.() ?? rawBounds._ne?.lat);
+  const east = Number(rawBounds.getEast?.() ?? rawBounds._ne?.lng);
+
+  if (![south, west, north, east].every(Number.isFinite)) {
+    return rawBounds;
+  }
+
+  const latPad = (north - south) * padFactor;
+  const lngPad = (east - west) * padFactor;
+
+  return {
+    bottomLeftLat: south - latPad,
+    bottomLeftLong: west - lngPad,
+    upperRightLat: north + latPad,
+    upperRightLong: east + lngPad,
+  };
 }
 
 function zoomIn() {
@@ -647,6 +678,14 @@ async function initializeMap() {
     updateUserMarkerScale();
   });
 
+  mapInstance.on("moveend", () => {
+    if (pages.selected !== "map") {
+      return;
+    }
+
+    void refreshVisibleEvents();
+  });
+
   mapInstance.on("load", async () => {
     if (import.meta.env.DEV && typeof window !== "undefined") {
       window.__beeMapLoadSteps = ["load"];
@@ -676,6 +715,10 @@ async function initializeMap() {
       if (import.meta.env.DEV && typeof window !== "undefined") {
         window.__beeMapLoadSteps.push("user");
       }
+      await refreshVisibleEvents();
+      if (import.meta.env.DEV && typeof window !== "undefined") {
+        window.__beeMapLoadSteps.push("viewport-events");
+      }
     } catch (error) {
       console.error("Map setup failed", error);
       if (import.meta.env.DEV && typeof window !== "undefined") {
@@ -702,7 +745,6 @@ async function onEventClicked(event) {
 
 onMounted(() => {
   void initializeMap();
-  preloadVisibleEvents(getPreferredCenter());
 });
 
 onBeforeUnmount(() => {
@@ -756,7 +798,6 @@ watch(
 
     syncUserMarker();
     if (!hasCenteredOnUser) {
-      await events.updateAvailableEvents(nextLocation.lat, nextLocation.lng);
       centerOnUser({ forceZoom: true });
     }
   },
@@ -810,6 +851,39 @@ watch(
   left: 1.1rem;
   width: min(49rem, calc(100% - 2.2rem));
   z-index: 500;
+}
+
+.map-loading-indicator {
+  position: absolute;
+  top: 5.9rem;
+  left: 1.1rem;
+  z-index: 490;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.8rem;
+  height: 2.8rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(14px);
+}
+
+.map-loading-indicator--floating {
+  width: 2.6rem;
+  height: 2.6rem;
+}
+
+.map-loading-indicator__spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 1.1rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  border-top-color: var(--accent);
+  animation: map-loader-spin 0.8s linear infinite;
 }
 
 .filter {
@@ -900,6 +974,13 @@ watch(
     top: 1rem;
   }
 
+  .map-loading-indicator {
+    top: 5.5rem;
+    left: 1rem;
+    max-width: calc(100% - 2rem);
+    min-width: 0;
+  }
+
   .map-controls {
     left: 0.8rem;
     bottom: calc(var(--bottom-nav-height) + 1.1rem);
@@ -971,6 +1052,12 @@ watch(
   50% {
     opacity: 0.75;
     transform: scale(1.08);
+  }
+}
+
+@keyframes map-loader-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

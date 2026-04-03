@@ -74,7 +74,9 @@ const initialState = {
   user: {
     username: 'PLEASELOGIN'
   },
-  isLoggedIn: false
+  isLoggedIn: false,
+  isBusy: false,
+  busyLabel: '',
 };
 
 const restoredState = loadStoredAuth();
@@ -93,6 +95,8 @@ export const auth = reactive({
    * @return {Promise<{result: boolean, msg: string}>}
    */
   async register(username, password) {
+    auth.isBusy = true;
+    auth.busyLabel = 'Creating account';
     try {
       const { result, msg, userId } = await createUser(username, password);
       if (result && userId) {
@@ -106,6 +110,9 @@ export const auth = reactive({
     } catch (err) {
       console.error(err);
       return { result: false, msg: err.message };
+    } finally {
+      auth.isBusy = false;
+      auth.busyLabel = '';
     }
   },
 
@@ -115,6 +122,8 @@ export const auth = reactive({
    * @param {string} password
    */
   async login(username, password) {
+    auth.isBusy = true;
+    auth.busyLabel = 'Signing in';
     try {
       const { result, msg, userId } = await loginUser(username, password);
       if (result && userId) {
@@ -128,10 +137,15 @@ export const auth = reactive({
     } catch (err) {
       console.error(err);
       return { result: false, msg: err.message };
+    } finally {
+      auth.isBusy = false;
+      auth.busyLabel = '';
     }
   },
 
   async continueAsGuest() {
+    auth.isBusy = true;
+    auth.busyLabel = 'Opening guest session';
     try {
       const guestSessionId = getGuestSessionId();
       if (!guestSessionId) {
@@ -149,6 +163,9 @@ export const auth = reactive({
     } catch (err) {
       console.error(err);
       return { result: false, msg: err.message };
+    } finally {
+      auth.isBusy = false;
+      auth.busyLabel = '';
     }
   },
 

@@ -20,12 +20,30 @@ export const getAvatar = (name) => createAvatar(lorelei, {
 // TO OUR API
 const API_ENDPOINT = import.meta.env.VITE_API_BASE_URL || "/api";
 const CODE = import.meta.env.VITE_API_CODE || "local-demo";
+const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 0);
+const READ_RESPONSE_CACHE_MS = 2500;
+const READ_ENDPOINTS = new Set([
+  'getAttendingEvents',
+  'getEventInfo',
+  'getEventComments',
+  'getMapEvents',
+  'getAllGroups',
+  'getAllUserGroups',
+  'getGroupEvents',
+  'getGroupChatMessages',
+  'getSavedEvents',
+  'getNotifications',
+  'getAllUserGroupEvents',
+  'getEventImgs',
+]);
+const inFlightReadRequests = new Map();
+const cachedReadResponses = new Map();
 
 /**
  * Get the string url for that path with client Id.
  * @param {string} path - The commands path.
  * @param {string} clientId - The id of the user making the request, defaults to 'default'.
- * @returns {string} A string url to make a request to.
+ * @returns {URL} A URL object to make a request to.
  */
 const getUrl = (path, clientId = "default") => {
   const apiRoot = API_ENDPOINT.startsWith("http")
@@ -34,7 +52,7 @@ const getUrl = (path, clientId = "default") => {
   const url = new URL(`${path}`, apiRoot.endsWith("/") ? apiRoot : `${apiRoot}/`);
   url.searchParams.set("code", CODE);
   url.searchParams.set("clientId", clientId);
-  return url.toString();
+  return url;
 };
 
 /**
@@ -44,19 +62,71 @@ const getUrl = (path, clientId = "default") => {
  * @param {Object} requestBody - The request body as an object.
  * @returns {function} A function that makes the request.
  */
-const createRequestFunction = (path, method, requestBody=undefined) => async () =>
-  new Promise((resolve, reject) =>
-    fetch(getUrl(path), {
+const createRequestFunction = (path, method, requestBody=undefined) => async () => {
+  const isDedupableRead = READ_ENDPOINTS.has(path);
+  const requestKey = isDedupableRead
+    ? `${method}:${path}:${JSON.stringify(requestBody || {})}`
+    : null;
+  const now = Date.now();
+
+  if (requestKey && inFlightReadRequests.has(requestKey)) {
+    return inFlightReadRequests.get(requestKey);
+  }
+
+  if (requestKey) {
+    const cached = cachedReadResponses.get(requestKey);
+    if (cached && now - cached.at < READ_RESPONSE_CACHE_MS) {
+      return cached.data;
+    }
+  }
+
+  const url = getUrl(path);
+  if (method === 'GET' && requestBody && typeof requestBody === 'object') {
+    Object.entries(requestBody).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value));
+      }
+    });
+  }
+
+  const requestPromise = new Promise((resolve, reject) => {
+    const controller = API_TIMEOUT_MS > 0 ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+      : null;
+
+    fetch(url.toString(), {
       method,
-      body: JSON.stringify(requestBody),
+      ...(method === 'GET' ? {} : { body: JSON.stringify(requestBody) }),
       headers: {
         'Content-Type': 'application/json',
-      }
+      },
+      ...(controller ? { signal: controller.signal } : {}),
     })
       .then((response) => response.json())
-      .then((data) => resolve(data))
+      .then((data) => {
+        if (requestKey) {
+          cachedReadResponses.set(requestKey, { data, at: Date.now() });
+        }
+        resolve(data);
+      })
       .catch((error) => reject(error))
-  );
+      .finally(() => {
+        if (requestKey) {
+          inFlightReadRequests.delete(requestKey);
+        }
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+      });
+  });
+
+  if (requestKey) {
+    inFlightReadRequests.set(requestKey, requestPromise);
+  }
+
+  return requestPromise;
+};
 
 /**
  * Request to create a user.
@@ -108,8 +178,8 @@ export const removeJoinEvent = async (userId, eventId) =>
  * @param {string} userId
  * @return {Promise<{result: boolean, msg: string, userId: string, attendingEvents: {EventObjects}}}>}
  */
-export const attendingEvents = async (userId) => 
-  createRequestFunction('getAttendingEvents', 'POST', {userId})()
+export const attendingEvents = async (userId, options = {}) => 
+  createRequestFunction('getAttendingEvents', 'POST', {userId, ...options})()
 
   /**
    * Create an event
@@ -163,8 +233,8 @@ export const createGroup = async (name, description, userId) =>
  * Get all groups
  * @return {Promise<{result: boolean, msg: string, groups: {GroupObjects}}>}
  */
-export const getAllGroups = async () => 
-  createRequestFunction('getAllGroups', 'GET')()
+export const getAllGroups = async (options = {}) => 
+  createRequestFunction('getAllGroups', 'GET', Object.keys(options).length ? options : undefined)()
 /**
  * Join group
  * @param {string} userId
@@ -178,8 +248,8 @@ export const joinGroup = async (userId, groupId) =>
  * get all groups a user is in
  * @param {string} userId
  **/
-export const getGroupsAPI = async (userId) => 
-  createRequestFunction('getAllUserGroups', 'POST', {userId})()
+export const getGroupsAPI = async (userId, options = {}) => 
+  createRequestFunction('getAllUserGroups', 'POST', {userId, ...options})()
 
 /**
  * get all the groups events
@@ -201,8 +271,11 @@ export const saveEvent = async (userId, eventId) =>
 export const removeSavedEvent = async (userId, eventId) =>
   createRequestFunction('removeSavedEvent', 'DELETE', { userId, eventId })()
 
-export const getSavedEvents = async (userId) =>
-  createRequestFunction('getSavedEvents', 'POST', { userId })()
+export const getSavedEvents = async (userId, options = {}) =>
+  createRequestFunction('getSavedEvents', 'POST', { userId, ...options })()
+
+export const getPlanningEvents = async (userId, options = {}) =>
+  createRequestFunction('getPlanningEvents', 'POST', { userId, ...options })()
 
 export const getNotifications = async (userId) =>
   createRequestFunction('getNotifications', 'POST', { userId })()

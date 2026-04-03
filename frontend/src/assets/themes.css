@@ -34,6 +34,9 @@
   --chrome-hover: rgba(244, 178, 35, 0.12);
   --map-control-surface: rgba(255, 251, 245, 0.94);
   --map-control-icon-filter: brightness(0) saturate(100%) invert(11%) sepia(13%) saturate(875%) hue-rotate(339deg) brightness(95%) contrast(90%);
+  --skeleton-base: #eadfcb;
+  --skeleton-mid: #f7eddc;
+  --skeleton-edge: #dfd0b7;
 
   --shadow-sm: 0 12px 28px rgba(49, 34, 24, 0.08);
   --shadow-md: 0 22px 50px rgba(49, 34, 24, 0.12);
@@ -100,6 +103,9 @@
   --chrome-hover: rgba(255, 255, 255, 0.06);
   --map-control-surface: rgba(18, 22, 29, 0.96);
   --map-control-icon-filter: brightness(0) saturate(100%) invert(95%) sepia(18%) saturate(425%) hue-rotate(316deg) brightness(104%) contrast(99%);
+  --skeleton-base: rgba(255, 255, 255, 0.08);
+  --skeleton-mid: rgba(255, 255, 255, 0.16);
+  --skeleton-edge: rgba(255, 255, 255, 0.06);
   --shadow-sm: 0 16px 36px rgba(0, 0, 0, 0.22);
   --shadow-md: 0 26px 56px rgba(0, 0, 0, 0.28);
   --shadow-lg: 0 34px 84px rgba(0, 0, 0, 0.36);

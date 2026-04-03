@@ -1,4 +1,8 @@
 export function parseEventDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
   const raw = typeof value === "object" && value !== null
     ? value.startTime || value.time
     : value;

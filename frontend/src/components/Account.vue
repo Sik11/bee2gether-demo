@@ -11,6 +11,12 @@ import Page from './helper/Page.vue';
 import Avatar from './helper/Avatar.vue';
 
 const router = useRouter();
+const loadingAccountSummary = computed(() =>
+  (events.loadingSavedEvents && !events.hasLoadedSavedEvents)
+  || (events.loadingUserEvents && !events.hasLoadedUserEvents)
+  || (groups.loadingUserGroups && !groups.hasLoadedUserGroups)
+  || (notifications.loading && !notifications.hasLoaded)
+);
 
 const accountId = computed(() => {
   const userId = auth.user?.userId;
@@ -56,34 +62,45 @@ function logout() {
     </section>
 
     <section class="summary-grid">
-      <article class="summary-card soft-panel">
-        <div class="summary-head">
-          <p class="eyebrow">Saved</p>
-          <strong>{{ events.savedEvents.length }}</strong>
-        </div>
-        <p class="summary-copy">Events you kept for later.</p>
-      </article>
-      <article class="summary-card soft-panel">
-        <div class="summary-head">
-          <p class="eyebrow">Joined</p>
-          <strong>{{ events.userEvents.length }}</strong>
-        </div>
-        <p class="summary-copy">Plans already on your schedule.</p>
-      </article>
-      <article class="summary-card soft-panel">
-        <div class="summary-head">
-          <p class="eyebrow">Groups</p>
-          <strong>{{ groups.userGroups.length }}</strong>
-        </div>
-        <p class="summary-copy">Communities you’re part of.</p>
-      </article>
-      <article class="summary-card soft-panel">
-        <div class="summary-head">
-          <p class="eyebrow">Alerts</p>
-          <strong>{{ notifications.unreadCount }}</strong>
-        </div>
-        <p class="summary-copy">Unread activity waiting in notifications.</p>
-      </article>
+      <template v-if="loadingAccountSummary">
+        <article v-for="item in 4" :key="`account-skeleton-${item}`" class="summary-card summary-card--skeleton soft-panel">
+          <div class="summary-head">
+            <p class="eyebrow skeleton-pill"></p>
+            <strong class="skeleton-number"></strong>
+          </div>
+          <p class="summary-copy skeleton-line"></p>
+        </article>
+      </template>
+      <template v-else>
+        <article class="summary-card soft-panel">
+          <div class="summary-head">
+            <p class="eyebrow">Saved</p>
+            <strong>{{ events.savedEvents.length }}</strong>
+          </div>
+          <p class="summary-copy">Events you kept for later.</p>
+        </article>
+        <article class="summary-card soft-panel">
+          <div class="summary-head">
+            <p class="eyebrow">Joined</p>
+            <strong>{{ events.userEvents.length }}</strong>
+          </div>
+          <p class="summary-copy">Plans already on your schedule.</p>
+        </article>
+        <article class="summary-card soft-panel">
+          <div class="summary-head">
+            <p class="eyebrow">Groups</p>
+            <strong>{{ groups.userGroups.length }}</strong>
+          </div>
+          <p class="summary-copy">Communities you’re part of.</p>
+        </article>
+        <article class="summary-card soft-panel">
+          <div class="summary-head">
+            <p class="eyebrow">Alerts</p>
+            <strong>{{ notifications.unreadCount }}</strong>
+          </div>
+          <p class="summary-copy">Unread activity waiting in notifications.</p>
+        </article>
+      </template>
     </section>
 
     <section class="settings-grid">
@@ -182,6 +199,38 @@ function logout() {
   margin: 0;
   color: var(--ink-soft);
   max-width: 18rem;
+}
+
+.summary-card--skeleton {
+  pointer-events: none;
+}
+
+.skeleton-pill,
+.skeleton-number,
+.skeleton-line {
+  display: block;
+  background:
+    linear-gradient(120deg, var(--skeleton-edge), var(--skeleton-mid), var(--skeleton-base));
+  background-size: 180% 100%;
+  animation: skeleton-shift 1.2s ease-in-out infinite;
+}
+
+.skeleton-pill {
+  width: 5.25rem;
+  height: 1.7rem;
+  border-radius: var(--radius-pill);
+}
+
+.skeleton-number {
+  width: 3rem;
+  height: 2.8rem;
+  border-radius: 1rem;
+}
+
+.skeleton-line {
+  width: 80%;
+  height: 0.95rem;
+  border-radius: 999px;
 }
 
 .header {
@@ -316,6 +365,15 @@ function logout() {
 
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@keyframes skeleton-shift {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
   }
 }
 </style>

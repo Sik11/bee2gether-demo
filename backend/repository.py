@@ -47,6 +47,13 @@ class MemoryRepository:
     def list_users(self) -> list[dict[str, Any]]:
         return [_clean(user) for user in self.users.values()]
 
+    def list_user_ids_for_group(self, group_id: str) -> list[str]:
+        member_ids: list[str] = []
+        for user in self.users.values():
+            if group_id in user.get("groupsMember", []):
+                member_ids.append(str(user["id"]))
+        return member_ids
+
     def clear_all(self) -> None:
         self.users.clear()
         self.events.clear()
@@ -117,6 +124,7 @@ class MongoRepository:
         self.users.create_index("id", unique=True)
         self.users.create_index("username", unique=True)
         self.users.create_index("guestSessionId", unique=True, sparse=True)
+        self.users.create_index("groupsMember")
         self.events.create_index("id", unique=True)
         self.events.create_index("name", unique=True)
         self.groups.create_index("id", unique=True)
@@ -145,6 +153,10 @@ class MongoRepository:
 
     def list_users(self) -> list[dict[str, Any]]:
         return [_clean(user) for user in self.users.find({})]
+
+    def list_user_ids_for_group(self, group_id: str) -> list[str]:
+        cursor = self.users.find({"groupsMember": group_id}, {"id": 1})
+        return [str(user["id"]) for user in cursor if user.get("id")]
 
     def clear_all(self) -> None:
         self.users.delete_many({})

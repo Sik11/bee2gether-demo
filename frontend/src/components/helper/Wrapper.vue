@@ -246,16 +246,18 @@ function toggleNotifications() {
   min-height: calc(100dvh - var(--topbar-height));
   max-height: calc(100dvh - var(--topbar-height));
   overflow: hidden;
+  isolation: isolate;
 }
 
 .sidebar {
+  position: sticky;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 1rem;
   padding: 1rem;
   border-radius: var(--radius-lg);
   background: var(--chrome-surface);
-  position: sticky;
   top: calc(var(--topbar-height) + 0.5rem);
   height: var(--shell-panel-height);
   min-height: var(--shell-panel-height);
@@ -276,6 +278,8 @@ function toggleNotifications() {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+  position: relative;
+  z-index: 1;
 }
 
 .nav-item {
@@ -307,6 +311,8 @@ function toggleNotifications() {
 }
 
 .workspace {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   height: calc(var(--shell-panel-height) - 1rem);
   max-height: calc(var(--shell-panel-height) - 1rem);
